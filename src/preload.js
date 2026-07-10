@@ -1,0 +1,42 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
+const on = (channel, cb) => ipcRenderer.on(channel, (_e, data) => cb(data));
+
+contextBridge.exposeInMainWorld('daylight', {
+  silentLogin: () => invoke('silent-login'),
+  listAccounts: () => invoke('list-accounts'),
+  addAccount: () => invoke('add-account'),
+  switchAccount: uuid => invoke('switch-account', uuid),
+  removeAccount: uuid => invoke('remove-account', uuid),
+  getConfig: () => invoke('get-config'),
+  setConfig: updates => invoke('set-config', updates),
+  getVersions: () => invoke('get-versions'),
+
+  listPacks: () => invoke('list-packs'),
+  selectPack: id => invoke('select-pack', id),
+  createPack: opts => invoke('create-pack', opts),
+  deletePack: id => invoke('delete-pack', id),
+  setPackVersion: opts => invoke('set-pack-version', opts),
+
+  launch: () => invoke('launch'),
+  searchMods: (query, packId) => invoke('search-mods', { query, packId }),
+  installMod: (projectId, packId) => invoke('install-mod', { projectId, packId }),
+  importMods: packId => invoke('import-mods', packId),
+  listMods: packId => invoke('list-mods', packId),
+  deleteMod: (filename, packId) => invoke('delete-mod', { filename, packId }),
+  openModsFolder: packId => invoke('open-mods-folder', packId),
+  openGameFolder: () => invoke('open-game-folder'),
+
+  checkUpdates: () => invoke('check-updates'),
+  installUpdate: () => invoke('install-update'),
+  getAppVersion: () => invoke('get-app-version'),
+
+  onProgress: cb => on('launch-progress', cb),
+  onGameLog: cb => on('game-log', cb),
+  onGameState: cb => on('game-state', cb),
+  onUpdateAvailable: cb => on('update-available', cb),
+  onUpdateProgress: cb => on('update-progress', cb),
+  onUpdateReady: cb => on('update-ready', cb),
+  onUpdateError: cb => on('update-error', cb)
+});
