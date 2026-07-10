@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Daylight</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-sun"></div>
+      <span class="brand-name">DAYLIGHT</span>
+    </div>
+
+    <!-- top-left account switcher -->
+    <div class="acct-switcher">
+      <button id="acct-current" class="acct-current">
+        <img id="acct-avatar" class="acct-avatar" alt="" width="28" height="28" />
+        <span id="acct-name" class="acct-name">Not logged in</span>
+        <span class="acct-caret">▾</span>
+      </button>
+      <div id="acct-menu" class="acct-menu hidden">
+        <div id="acct-list"></div>
+        <button id="acct-add" class="acct-add">+ Add account</button>
+      </div>
+    </div>
+
+    <nav>
+      <button class="nav-btn active" data-tab="home"><span class="nav-ico">▶</span> Home</button>
+      <button class="nav-btn" data-tab="packs"><span class="nav-ico">▦</span> Packs</button>
+      <button class="nav-btn" data-tab="mods"><span class="nav-ico">✦</span> Mods</button>
+      <button class="nav-btn" data-tab="settings"><span class="nav-ico">⚙</span> Settings</button>
+    </nav>
+
+    <div class="sidebar-spacer"></div>
+  </aside>
+
+  <main>
+    <!-- HOME -->
+    <section id="tab-home" class="tab-panel active">
+      <div class="hero">
+        <div class="hero-glow"></div>
+        <h2>Daylight</h2>
+        <p>Modules, emotes &amp; boosted frames.<br/>Press <kbd>Right Shift</kbd> in game to open the module GUI.</p>
+      </div>
+
+      <div id="progress-wrap" class="hidden">
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <div id="progress-label"></div>
+      </div>
+
+      <div class="launch-bar">
+        <div class="launch-pack">
+          <label>PACK</label>
+          <select id="pack-select"></select>
+          <span id="pack-version" class="pack-version"></span>
+        </div>
+        <button id="play-btn" class="btn btn-launch" disabled>LOG IN TO PLAY</button>
+      </div>
+
+      <details class="log-details">
+        <summary>Game log</summary>
+        <pre id="log" class="log"></pre>
+      </details>
+    </section>
+
+    <!-- PACKS -->
+    <section id="tab-packs" class="tab-panel">
+      <h2 class="page-title">Packs</h2>
+      <div id="pack-grid" class="pack-grid"></div>
+    </section>
+
+    <!-- MODS -->
+    <section id="tab-mods" class="tab-panel">
+      <h2 class="page-title">Mods</h2>
+      <div class="mods-packbar">
+        <label for="mods-pack-select">Installing to pack</label>
+        <select id="mods-pack-select"></select>
+        <span id="mods-pack-version" class="pack-version"></span>
+      </div>
+      <div class="mods-toolbar">
+        <input id="mod-search" type="text" placeholder="Search Modrinth for Fabric mods…" />
+        <button id="mod-search-btn" class="btn btn-small">Search</button>
+        <button id="add-mod-btn" class="btn btn-small btn-ghost">Add mod file(s)</button>
+        <button id="open-mods-btn" class="btn btn-small btn-ghost">Open mods folder</button>
+      </div>
+      <div class="mods-columns">
+        <div class="mods-col">
+          <h3>Search results</h3>
+          <ul id="mod-results" class="mod-list"></ul>
+        </div>
+        <div class="mods-col">
+          <h3>Installed</h3>
+          <ul id="mod-installed" class="mod-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab-panel">
+      <h2 class="page-title">Settings</h2>
+      <div class="setting">
+        <label for="min-ram">Minimum RAM (GB)</label>
+        <input id="min-ram" type="number" min="1" max="32" />
+      </div>
+      <div class="setting">
+        <label for="max-ram">Maximum RAM (GB)</label>
+        <input id="max-ram" type="number" min="1" max="64" />
+      </div>
+      <div class="setting">
+        <label for="java-path">Java path <small>(leave empty to auto-detect — MC 26.x needs Java 25)</small></label>
+        <input id="java-path" type="text" placeholder="auto-detect" />
+      </div>
+      <div class="setting">
+        <label for="azure-id">Azure client ID <small>(optional — your own approved Azure app)</small></label>
+        <input id="azure-id" type="text" placeholder="leave empty to use the default login" />
+      </div>
+      <div class="setting-actions">
+        <button id="save-settings" class="btn">Save settings</button>
+        <button id="open-game-dir" class="btn btn-ghost">Open game folder</button>
+        <span id="settings-saved" class="saved-note hidden">Saved ✔</span>
+      </div>
+
+      <div class="setting update-setting">
+        <label>Updates <small id="app-version"></small></label>
+        <div class="update-row">
+          <button id="check-update-btn" class="btn btn-ghost">Check for updates</button>
+          <span id="update-status" class="update-status"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- new pack dialog -->
+  <dialog id="pack-dialog">
+    <h3>New pack</h3>
+    <input id="new-pack-name" type="text" placeholder="Pack name" maxlength="24" />
+    <select id="new-pack-version"></select>
+    <div class="dialog-actions">
+      <button id="pack-create-cancel" class="btn btn-ghost btn-small">Cancel</button>
+      <button id="pack-create-ok" class="btn btn-small">Create</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
