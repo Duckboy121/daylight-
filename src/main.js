@@ -643,6 +643,7 @@ function initUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('update-available', info => send('update-available', info.version));
+  autoUpdater.on('update-not-available', () => send('update-none'));
   autoUpdater.on('download-progress', p => send('update-progress', Math.round(p.percent)));
   autoUpdater.on('update-downloaded', info => send('update-ready', info.version));
   autoUpdater.on('error', err => send('update-error', String(err?.message || err)));

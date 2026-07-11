@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('daylight', {
   onGameLog: cb => on('game-log', cb),
   onGameState: cb => on('game-state', cb),
   onUpdateAvailable: cb => on('update-available', cb),
+  onUpdateNone: cb => on('update-none', cb),
   onUpdateProgress: cb => on('update-progress', cb),
   onUpdateReady: cb => on('update-ready', cb),
   onUpdateError: cb => on('update-error', cb)

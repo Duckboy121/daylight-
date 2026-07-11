@@ -26,10 +26,10 @@
     </div>
 
     <nav>
-      <button class="nav-btn active" data-tab="home"><span class="nav-ico">▶</span> Home</button>
-      <button class="nav-btn" data-tab="packs"><span class="nav-ico">▦</span> Packs</button>
-      <button class="nav-btn" data-tab="mods"><span class="nav-ico">✦</span> Mods</button>
-      <button class="nav-btn" data-tab="settings"><span class="nav-ico">⚙</span> Settings</button>
+      <button class="nav-btn active" data-tab="home"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span> Home</button>
+      <button class="nav-btn" data-tab="packs"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg></span> Packs</button>
+      <button class="nav-btn" data-tab="mods"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M19 8h-1V6a2 2 0 0 0-2-2h-2.5a1.5 1.5 0 0 0-3 0H8a2 2 0 0 0-2 2v2H5a2 2 0 0 0 0 4h1v4a2 2 0 0 0 2 2h2.5a1.5 1.5 0 0 1 3 0H16a2 2 0 0 0 2-2v-4h1a2 2 0 0 0 0-4Z"/></svg></span> Mods</button>
+      <button class="nav-btn" data-tab="settings"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg></span> Settings</button>
     </nav>
 
     <div class="sidebar-spacer"></div>
@@ -58,10 +58,19 @@
         <button id="play-btn" class="btn btn-launch" disabled>LOG IN TO PLAY</button>
       </div>
 
-      <details class="log-details">
-        <summary>Game log</summary>
-        <pre id="log" class="log"></pre>
-      </details>
+      <div class="log-card" id="log-card">
+        <div class="log-head" id="log-head">
+          <span class="log-chev">▶</span> Game log
+          <span class="log-actions">
+            <button id="log-settings" title="Open settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg></button>
+            <button id="log-clear" title="Clear log"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+          </span>
+        </div>
+        <div class="log-body">
+          <svg class="log-spark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.6 4.8 2.2 6.4 7 7-4.8.6-6.4 2.2-7 7-.6-4.8-2.2-6.4-7-7 4.8-.6 6.4-2.2 7-7Z"/></svg>
+          <pre id="log" class="log"></pre>
+        </div>
+      </div>
     </section>
 
     <!-- PACKS -->
