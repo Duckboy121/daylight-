@@ -473,7 +473,10 @@ async function searchMods() {
       title.textContent = hit.title;
       const desc = document.createElement('div');
       desc.className = 'mod-desc';
-      desc.textContent = hit.description;
+      desc.textContent = hit.description.length > 90
+        ? hit.description.slice(0, 90).trimEnd() + '…'
+        : hit.description;
+      desc.title = hit.description;
       meta.append(title, desc);
 
       const install = document.createElement('button');
