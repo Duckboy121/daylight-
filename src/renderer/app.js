@@ -81,7 +81,7 @@ function renderAccountMenu() {
 
     const remove = document.createElement('button');
     remove.className = 'acct-remove';
-    remove.textContent = '✕';
+    remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
     remove.title = 'Remove account';
     remove.addEventListener('click', async e => {
       e.stopPropagation();
@@ -431,7 +431,7 @@ async function refreshInstalledMods() {
     if (mod.builtin) {
       const badge = document.createElement('span');
       badge.className = 'builtin-badge';
-      badge.textContent = '🔒 Built-in';
+      badge.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Built-in</span>';
       list.append(modItem([name, badge]));
       continue;
     }
