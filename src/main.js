@@ -119,27 +119,110 @@ function saveConfig(cfg) {
 
 let config = null;
 
-// ---------- java detection ----------
+// ---------- java provisioning ----------
 
-// Newest JDK wins: MC 26.x needs Java 25, older versions run fine on it too.
-function findJava() {
-  if (config.javaPath) return config.javaPath;
-  const roots = ['C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java'];
+const RUNTIME_DIR = path.join(GAME_ROOT, 'runtime');
+
+// Which Java major an MC version needs.
+function requiredJavaFor(mcVersion) {
+  const head = Number(mcVersion.split('.')[0]);
+  if (head >= 26) return 25;                    // year-based versions (26.x+)
+  const m = mcVersion.match(/^1\.(\d+)(?:\.(\d+))?/);
+  if (!m) return 21;
+  const minor = Number(m[1]);
+  const patch = Number(m[2] || 0);
+  if (minor > 20 || (minor === 20 && patch >= 5)) return 21;
+  if (minor >= 17) return 17;
+  return 8;
+}
+
+// Newest system JDK that satisfies the requirement. Old MC (Java 8 era)
+// breaks on modern JVMs, so for those only an exact major counts.
+function findSystemJava(need) {
+  const roots = ['C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java',
+    'C:\\Program Files\\Microsoft', 'C:\\Program Files\\Zulu'];
   let best = null;
   let bestVer = 0;
   for (const root of roots) {
     if (!fs.existsSync(root)) continue;
     for (const dir of fs.readdirSync(root)) {
-      const m = dir.match(/jdk-?(\d+)/i);
+      const m = dir.match(/jdk-?(\d+)|jre-?(\d+)/i);
       if (!m) continue;
+      const ver = Number(m[1] || m[2]);
+      const ok = need >= 17 ? ver >= need : ver === need;
+      if (!ok) continue;
       const exe = path.join(root, dir, 'bin', 'javaw.exe');
-      if (Number(m[1]) > bestVer && fs.existsSync(exe)) {
-        bestVer = Number(m[1]);
+      if (ver > bestVer && fs.existsSync(exe)) {
+        bestVer = ver;
         best = exe;
       }
     }
   }
-  return best || undefined; // undefined = let MCLC use "java" from PATH
+  return best;
+}
+
+// A runtime we downloaded ourselves lives under runtime/jdk-<major>/…/bin/javaw.exe
+function findManagedJava(need) {
+  const base = path.join(RUNTIME_DIR, `jdk-${need}`);
+  if (!fs.existsSync(base)) return null;
+  const direct = path.join(base, 'bin', 'javaw.exe');
+  if (fs.existsSync(direct)) return direct;
+  for (const dir of fs.readdirSync(base)) {
+    const nested = path.join(base, dir, 'bin', 'javaw.exe');
+    if (fs.existsSync(nested)) return nested;
+  }
+  return null;
+}
+
+function extractZip(zip, dest) {
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    // Windows 10+ ships bsdtar, which reads zips; PowerShell is the fallback.
+    execFile('tar', ['-xf', zip, '-C', dest], err => {
+      if (!err) return resolve();
+      execFile('powershell', ['-NoProfile', '-Command',
+        `Expand-Archive -LiteralPath "${zip}" -DestinationPath "${dest}" -Force`],
+        err2 => err2 ? reject(new Error('Could not extract Java runtime: ' + err2.message)) : resolve());
+    });
+  });
+}
+
+// Returns a javaw.exe suitable for the given MC version, downloading a JRE
+// from Adoptium if the machine has nothing suitable — so a fresh PC can
+// install, log in and play with zero setup.
+async function ensureJava(mcVersion, progress) {
+  if (config.javaPath) return config.javaPath;
+  const need = requiredJavaFor(mcVersion);
+  const found = findSystemJava(need) || findManagedJava(need);
+  if (found) return found;
+
+  progress(`Downloading Java ${need}`, 0, 1);
+  const url = `https://api.adoptium.net/v3/binary/latest/${need}/ga/windows/x64/jre/hotspot/normal/eclipse`;
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`Java ${need} download failed (HTTP ${res.status}) — set a Java path in Settings`);
+  const total = Number(res.headers.get('content-length')) || 0;
+
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+  const zipPath = path.join(RUNTIME_DIR, `jre-${need}.zip`);
+  const out = fs.createWriteStream(zipPath);
+  let got = 0;
+  for await (const chunk of res.body) {
+    got += chunk.length;
+    out.write(chunk);
+    if (total) progress(`Downloading Java ${need}`, got, total);
+  }
+  await new Promise(r => out.end(r));
+
+  progress(`Installing Java ${need}`, 1, 1);
+  const destDir = path.join(RUNTIME_DIR, `jdk-${need}`);
+  fs.rmSync(destDir, { recursive: true, force: true });
+  fs.mkdirSync(destDir, { recursive: true });
+  await extractZip(zipPath, destDir);
+  fs.rmSync(zipPath, { force: true });
+
+  const exe = findManagedJava(need);
+  if (!exe) throw new Error('Java install failed — set a Java path in Settings');
+  return exe;
 }
 
 // ---------- auth ----------
@@ -477,7 +560,9 @@ async function launchGame() {
     send('launch-progress', { label: `Downloading ${e.type}: ${e.name}`, current: e.current, total: e.total })
   );
 
-  const javaPath = findJava();
+  const javaPath = await ensureJava(pack.version, (label, current, total) =>
+    send('launch-progress', { label, current, total })
+  );
   const proc = await launcher.launch({
     root: GAME_ROOT,
     authorization: minecraftToken.mclc(),
