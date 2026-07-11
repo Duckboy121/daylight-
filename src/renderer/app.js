@@ -177,7 +177,7 @@ async function refreshPacks() {
   const sel = selectedPack();
   if (sel) {
     select.value = sel.id;
-    $('pack-version').textContent = `Minecraft ${sel.version} · Fabric · ${sel.modCount} mods`;
+    $('pack-version').textContent = `Minecraft ${sel.version}, Fabric, ${sel.modCount} mods`;
   }
 }
 
@@ -314,6 +314,7 @@ $('play-btn').addEventListener('click', async () => {
   updatePlayButton();
   $('progress-wrap').classList.remove('hidden');
   $('log').textContent = '';
+  $('log-card').classList.add('open');
   try {
     await call('launch');
   } catch (err) {
@@ -322,6 +323,18 @@ $('play-btn').addEventListener('click', async () => {
     launching = false;
     updatePlayButton();
   }
+});
+
+// ---------- game log card ----------
+
+$('log-head').addEventListener('click', () => $('log-card').classList.toggle('open'));
+$('log-clear').addEventListener('click', e => {
+  e.stopPropagation();
+  $('log').textContent = '';
+});
+$('log-settings').addEventListener('click', e => {
+  e.stopPropagation();
+  document.querySelector('.nav-btn[data-tab="settings"]').click();
 });
 
 window.daylight.onProgress(p => {
@@ -534,6 +547,10 @@ $('check-update-btn').addEventListener('click', async () => {
 
 window.daylight.onUpdateAvailable(version => {
   $('update-status').textContent = `Downloading v${version}…`;
+});
+
+window.daylight.onUpdateNone(() => {
+  $('update-status').textContent = 'Up to date';
 });
 
 window.daylight.onUpdateProgress(pct => {
