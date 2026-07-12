@@ -57,8 +57,8 @@ function modBuildFor(version) {
 }
 
 // Client-side performance mods (Modrinth slugs) — Sodium & friends are where
-// the real FPS gains come from.
-const PERF_MODS = ['fabric-api', 'sodium', 'lithium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'krypton'];
+// the real FPS gains come from. Versions without a build are skipped.
+const PERF_MODS = ['fabric-api', 'sodium', 'lithium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'krypton', 'badoptimizations'];
 
 // Tuned G1GC flags for smoother frametimes than JVM defaults.
 const JVM_FLAGS = [
@@ -69,8 +69,18 @@ const JVM_FLAGS = [
   '-XX:G1NewSizePercent=20',
   '-XX:G1ReservePercent=20',
   '-XX:G1HeapRegionSize=32M',
-  '-XX:+AlwaysPreTouch'
+  '-XX:+UseStringDeduplication'
 ];
+
+// Heap sized to the machine: an undersized heap on a big modpack means
+// constant GC stutter, the most common "modded Minecraft is laggy" cause.
+function defaultRam() {
+  const gb = require('os').totalmem() / (1024 ** 3);
+  if (gb >= 24) return { min: 4, max: 8 };
+  if (gb >= 12) return { min: 3, max: 6 };
+  return { min: 2, max: 4 };
+}
+const RAM = defaultRam();
 
 // Every pack — built-in and custom — includes the Daylight mod and the
 // performance mod set as a baseline.
@@ -90,8 +100,8 @@ let gameRunning = false;
 const defaultConfig = {
   selectedPack: 'daylight',
   packs: {},            // per-pack state: { version, name?, custom? }
-  minRam: 2,
-  maxRam: 4,
+  minRam: RAM.min,
+  maxRam: RAM.max,
   javaPath: '',
   azureClientId: '',
   accounts: [],         // [{ uuid, name, refreshToken }]
@@ -141,6 +151,13 @@ function loadConfig() {
   cfg.packs = cfg.packs || {};
 
   const recovered = recoverOrphanPacks(cfg);
+
+  // Configs still on the old universal default (2/4 GB) get upgraded to the
+  // machine-sized heap — an undersized heap causes GC lag on big packs.
+  if (cfg.minRam === 2 && cfg.maxRam === 4 && RAM.max > 4) {
+    cfg.minRam = RAM.min;
+    cfg.maxRam = RAM.max;
+  }
 
   // selected pack may be gone (removed builtin or deleted custom pack)
   if (!BUILTIN_PACKS[cfg.selectedPack] && !cfg.packs[cfg.selectedPack]?.custom) {
