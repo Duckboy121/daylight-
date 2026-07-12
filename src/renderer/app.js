@@ -588,15 +588,33 @@ window.daylight.onUpdateError(msg => {
 
 // ---------- init ----------
 
+// The version list needs the network; keep trying in the background so a
+// cold boot (network not up yet) never blocks anything.
+async function loadVersions(attempt = 0) {
+  try {
+    versions = await call('getVersions');
+    if (versions.length) {
+      if (document.getElementById('tab-packs').classList.contains('active')) renderPackGrid();
+      return;
+    }
+  } catch { /* offline — retry below */ }
+  if (attempt < 6) setTimeout(() => loadVersions(attempt + 1), 5000);
+}
+
 (async function init() {
+  // 1. Local data first — this reads config on disk and must NEVER be blocked
+  //    by the network, or a cold boot hides the user's packs.
   try {
     await loadSettings();
-    versions = await call('getVersions');
     await refreshPacks();
   } catch (err) {
-    toast('Failed to load (offline?): ' + err.message, true);
+    toast('Failed to load launcher data: ' + err.message, true);
   }
 
+  // 2. Version list (network) — optional; failure must not hide packs.
+  loadVersions();
+
+  // 3. Account (network) — optional.
   try {
     profile = await call('silentLogin');
     accounts = await call('listAccounts');
