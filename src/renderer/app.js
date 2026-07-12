@@ -24,10 +24,23 @@ async function call(fn, ...args) {
   return res.data;
 }
 
-function appendLog(line) {
+// Log lines stream in fast during a modded launch; writing the DOM per line
+// causes a reflow each time. Buffer and flush at most every 150ms, and cap
+// the kept text so a long session can't grow memory forever.
+let logBuffer = '';
+let logFlushTimer = null;
+function flushLog() {
+  logFlushTimer = null;
   const log = $('log');
-  log.textContent += line.endsWith('\n') ? line : line + '\n';
+  let text = log.textContent + logBuffer;
+  logBuffer = '';
+  if (text.length > 120000) text = text.slice(-90000);
+  log.textContent = text;
   log.scrollTop = log.scrollHeight;
+}
+function appendLog(line) {
+  logBuffer += line.endsWith('\n') ? line : line + '\n';
+  if (!logFlushTimer) logFlushTimer = setTimeout(flushLog, 150);
 }
 
 function selectedPack() {
@@ -313,6 +326,7 @@ $('play-btn').addEventListener('click', async () => {
   launching = true;
   updatePlayButton();
   $('progress-wrap').classList.remove('hidden');
+  logBuffer = '';
   $('log').textContent = '';
   $('log-card').classList.add('open');
   try {
@@ -330,6 +344,7 @@ $('play-btn').addEventListener('click', async () => {
 $('log-head').addEventListener('click', () => $('log-card').classList.toggle('open'));
 $('log-clear').addEventListener('click', e => {
   e.stopPropagation();
+  logBuffer = '';
   $('log').textContent = '';
 });
 $('log-settings').addEventListener('click', e => {
