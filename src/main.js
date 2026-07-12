@@ -98,23 +98,74 @@ const defaultConfig = {
   activeUuid: ''
 };
 
-function loadConfig() {
-  let cfg;
+function readConfigFile(p) {
+  const raw = fs.readFileSync(p, 'utf8');
+  if (!raw.trim()) throw new Error('empty config');
+  return JSON.parse(raw);
+}
+
+// Re-registers any custom pack whose folder exists on disk but is missing
+// from config — so packs survive even if the config is ever lost/reset.
+function recoverOrphanPacks(cfg) {
+  let recovered = 0;
   try {
-    cfg = { ...defaultConfig, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) };
+    if (!fs.existsSync(PACKS_ROOT)) return 0;
+    for (const dir of fs.readdirSync(PACKS_ROOT)) {
+      if (!dir.startsWith('custom-')) continue;
+      if (cfg.packs[dir]?.custom) continue;
+      const full = path.join(PACKS_ROOT, dir);
+      if (!fs.statSync(full).isDirectory()) continue;
+      let version = DEFAULT_MC_VERSION;
+      try {
+        const man = JSON.parse(fs.readFileSync(path.join(full, 'installed.json'), 'utf8'));
+        if (man.mcVersion) version = man.mcVersion;
+      } catch { /* no manifest — use default version */ }
+      cfg.packs[dir] = { custom: true, name: dir.replace(/^custom-/, ''), version };
+      recovered++;
+    }
+  } catch { /* ignore */ }
+  return recovered;
+}
+
+function loadConfig() {
+  // Prefer the live config, fall back to the last-good backup if the live one
+  // is corrupt/truncated (e.g. an unclean shutdown mid-write).
+  let parsed = null;
+  let usedBackup = false;
+  try {
+    parsed = readConfigFile(CONFIG_PATH);
   } catch {
-    cfg = { ...defaultConfig };
+    try { parsed = readConfigFile(CONFIG_PATH + '.bak'); usedBackup = true; } catch { /* both gone */ }
   }
+  const cfg = { ...defaultConfig, ...(parsed || {}) };
+  cfg.packs = cfg.packs || {};
+
+  const recovered = recoverOrphanPacks(cfg);
+
   // selected pack may be gone (removed builtin or deleted custom pack)
   if (!BUILTIN_PACKS[cfg.selectedPack] && !cfg.packs[cfg.selectedPack]?.custom) {
     cfg.selectedPack = 'daylight';
   }
+
+  // Repair the live config file whenever we recovered packs, fell back to the
+  // backup, or had nothing readable at all.
+  if (recovered > 0 || usedBackup || parsed === null) {
+    try { saveConfig(cfg); } catch { /* ignore */ }
+  }
   return cfg;
 }
 
+// Atomic write (temp + rename) with a rolling backup so a crash mid-write can
+// never leave a truncated config.
 function saveConfig(cfg) {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  const data = JSON.stringify(cfg, null, 2);
+  const tmp = CONFIG_PATH + '.tmp';
+  fs.writeFileSync(tmp, data);
+  try {
+    if (fs.existsSync(CONFIG_PATH)) fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + '.bak');
+  } catch { /* backup is best-effort */ }
+  fs.renameSync(tmp, CONFIG_PATH); // atomic replace on the same volume
 }
 
 let config = null;
