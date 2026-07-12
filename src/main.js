@@ -406,9 +406,26 @@ async function fetchJson(url) {
   return res.json();
 }
 
+const VERSIONS_CACHE = path.join(GAME_ROOT, 'versions-cache.json');
+
 async function getGameVersions() {
-  const versions = await fetchJson(`${FABRIC_META}/versions/game`);
-  return versions.filter(v => v.stable).map(v => v.version);
+  try {
+    const versions = await fetchJson(`${FABRIC_META}/versions/game`);
+    const stable = versions.filter(v => v.stable).map(v => v.version);
+    try {
+      fs.mkdirSync(GAME_ROOT, { recursive: true });
+      fs.writeFileSync(VERSIONS_CACHE, JSON.stringify(stable));
+    } catch { /* cache is best-effort */ }
+    return stable;
+  } catch (err) {
+    // Offline (e.g. cold boot): fall back to the last cached list so the
+    // version pickers still work.
+    try {
+      return JSON.parse(fs.readFileSync(VERSIONS_CACHE, 'utf8'));
+    } catch {
+      throw err;
+    }
+  }
 }
 
 async function getLatestLoader() {

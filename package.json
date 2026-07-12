@@ -1,7 +1,7 @@
 {
   "name": "daylight-launcher",
   "productName": "Daylight",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Daylight — custom Minecraft launcher: modpacks, Fabric mods, modules and Microsoft login",
   "main": "src/main.js",
   "scripts": {
