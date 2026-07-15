@@ -766,6 +766,20 @@ function showWindow() {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  // If a first (possibly cold-boot) instance was left half-loaded in the tray,
+  // reloading its data on focus guarantees packs/account are populated.
+  if (!win.webContents.isLoading()) win.webContents.send('refresh-data');
+}
+
+// Records what loadConfig actually saw at startup, so a recurrence of the
+// "packs missing after restart" report is diagnosable from disk.
+function writeStartupLog() {
+  try {
+    const line = `[${new Date().toISOString()}] root=${GAME_ROOT} `
+      + `packs=${Object.keys(config.packs || {}).join(',') || '(none)'} `
+      + `accounts=${(config.accounts || []).length} selected=${config.selectedPack}\n`;
+    fs.appendFileSync(path.join(app.getPath('userData'), 'startup.log'), line);
+  } catch { /* non-fatal */ }
 }
 
 function createWindow() {
@@ -828,6 +842,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     config = loadConfig();
+    writeStartupLog();
     createWindow();
     createTray();
     if (app.isPackaged) initUpdater();

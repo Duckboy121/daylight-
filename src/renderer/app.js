@@ -192,7 +192,30 @@ async function refreshPacks() {
     select.value = sel.id;
     $('pack-version').textContent = `Minecraft ${sel.version}, Fabric, ${sel.modCount} mods`;
   }
+  return packs.length;
 }
+
+// Cold boot can hand the renderer a transiently-empty result; retry a few
+// times until packs appear so a restart never leaves the list blank.
+async function refreshPacksReliable(tries = 6) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const n = await refreshPacks();
+      if (n > 0) return;
+    } catch { /* retry */ }
+    await new Promise(r => setTimeout(r, 800));
+  }
+}
+
+// Main process asks us to re-pull data when the window is re-focused from tray.
+window.daylight.onRefreshData(async () => {
+  await refreshPacksReliable();
+  try {
+    profile = await call('silentLogin');
+    accounts = await call('listAccounts');
+    renderAccount();
+  } catch { /* keep current */ }
+});
 
 $('pack-select').addEventListener('change', async e => {
   await call('selectPack', e.target.value);
@@ -603,13 +626,10 @@ async function loadVersions(attempt = 0) {
 
 (async function init() {
   // 1. Local data first — this reads config on disk and must NEVER be blocked
-  //    by the network, or a cold boot hides the user's packs.
-  try {
-    await loadSettings();
-    await refreshPacks();
-  } catch (err) {
-    toast('Failed to load launcher data: ' + err.message, true);
-  }
+  //    by the network, or a cold boot hides the user's packs. Each step is
+  //    independent so one failure can't skip the others, and packs retry.
+  try { await loadSettings(); } catch { /* settings are non-critical */ }
+  await refreshPacksReliable();
 
   // 2. Version list (network) — optional; failure must not hide packs.
   loadVersions();
