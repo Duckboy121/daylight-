@@ -32,6 +32,11 @@ function resolveGameRoot() {
 }
 
 const GAME_ROOT = resolveGameRoot();
+// True when this process runs inside a Windows AppContainer sandbox (e.g. a
+// dev-tool test launch): %APPDATA% is then silently redirected into the
+// container's LocalCache, so packs/config written here never reach the user's
+// normal install. The UI shows a warning badge so such a launch is unmistakable.
+const IS_SANDBOXED = /\\Packages\\/i.test(GAME_ROOT);
 const PACKS_ROOT = path.join(GAME_ROOT, 'packs');
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 const BUNDLED_DIR = app.isPackaged
@@ -93,6 +98,7 @@ const BUILTIN_PACKS = {
 
 let win = null;
 let minecraftToken = null;
+let tokenTime = 0; // when minecraftToken was minted — stale tokens cause "Invalid session"
 let gameRunning = false;
 
 // ---------- config ----------
@@ -150,6 +156,14 @@ function loadConfig() {
   const cfg = { ...defaultConfig, ...(parsed || {}) };
   cfg.packs = cfg.packs || {};
 
+  // Pre-2.1 single-account field, superseded by accounts[] once activeUuid is
+  // set — drop it so a long-dead token can't linger in the config forever.
+  let removedLegacy = false;
+  if (cfg.activeUuid && cfg.refreshToken) {
+    delete cfg.refreshToken;
+    removedLegacy = true;
+  }
+
   const recovered = recoverOrphanPacks(cfg);
 
   // Configs still on the old universal default (2/4 GB) get upgraded to the
@@ -166,7 +180,7 @@ function loadConfig() {
 
   // Repair the live config file whenever we recovered packs, fell back to the
   // backup, or had nothing readable at all.
-  if (recovered > 0 || usedBackup || parsed === null) {
+  if (recovered > 0 || usedBackup || parsed === null || removedLegacy) {
     try { saveConfig(cfg); } catch { /* ignore */ }
   }
   return cfg;
@@ -329,6 +343,7 @@ async function addAccount() {
   const authManager = makeAuthManager();
   const xboxManager = await authManager.launch('electron');
   minecraftToken = await xboxManager.getMinecraft();
+  tokenTime = Date.now();
   const profile = profileFromToken(minecraftToken);
   const refreshToken = xboxManager.save();
   const existing = accountByUuid(profile.uuid);
@@ -350,6 +365,7 @@ async function switchAccount(uuid) {
   const authManager = makeAuthManager();
   const xboxManager = await authManager.refresh(acc.refreshToken);
   minecraftToken = await xboxManager.getMinecraft();
+  tokenTime = Date.now();
   acc.refreshToken = xboxManager.save();
   acc.name = minecraftToken.profile.name;
   config.activeUuid = uuid;
@@ -373,6 +389,7 @@ async function trySilentLogin() {
     try {
       const xboxManager = await makeAuthManager().refresh(config.refreshToken);
       minecraftToken = await xboxManager.getMinecraft();
+      tokenTime = Date.now();
       const profile = profileFromToken(minecraftToken);
       config.accounts.push({
         uuid: profile.uuid,
@@ -396,6 +413,18 @@ async function trySilentLogin() {
   } catch {
     return null; // token expired/revoked — user re-adds the account
   }
+}
+
+// Repairs a stale login ("Invalid session" in game): silently re-refresh the
+// active account's token; if the refresh token itself is dead, fall back to a
+// full Microsoft re-login popup. Either way the stored account is updated.
+async function fixSession() {
+  if (config.activeUuid) {
+    try {
+      return await switchAccount(config.activeUuid);
+    } catch { /* refresh token dead — needs interactive login */ }
+  }
+  return addAccount();
 }
 
 // ---------- fabric / versions ----------
@@ -620,6 +649,10 @@ async function importMods(packId) {
 
 // ---------- launch ----------
 
+// Lines in the game/launcher output that mean the account token has gone
+// stale — the game then rejects server joins with "Invalid session".
+const SESSION_ERROR_RE = /invalid session|invalidcredentialsexception|(status|http|error)\s*:?\s*401/i;
+
 async function launchGame() {
   if (!minecraftToken) throw new Error('Not logged in');
   if (gameRunning) throw new Error('Game is already running');
@@ -627,6 +660,17 @@ async function launchGame() {
   const send = (ch, data) => win && !win.isDestroyed() && win.webContents.send(ch, data);
   const pack = packDef(config.selectedPack);
   if (!pack) throw new Error('No pack selected');
+
+  // Minecraft session tokens expire after ~24h; an app left running in the
+  // tray for days would launch the game with a dead token. Refresh silently
+  // when the token is over an hour old; if that fails, keep the old token and
+  // let the in-game detector below offer the one-click fix.
+  if (config.activeUuid && Date.now() - tokenTime > 60 * 60 * 1000) {
+    send('launch-progress', { label: 'Refreshing login…', current: 0, total: 1 });
+    try {
+      await switchAccount(config.activeUuid);
+    } catch { /* offline or token dead — detector handles it */ }
+  }
 
   send('launch-progress', { label: 'Preparing pack…', current: 0, total: 1 });
   await ensurePackReady(pack, (label, current, total) =>
@@ -636,8 +680,19 @@ async function launchGame() {
   const fabricId = await ensureFabricProfile(pack.version);
 
   const launcher = new Client();
-  launcher.on('debug', m => send('game-log', String(m)));
-  launcher.on('data', m => send('game-log', String(m)));
+  // Watch the stream for stale-session symptoms and tell the renderer once,
+  // so it can offer a one-click "fix login & relaunch".
+  let sessionErrorSent = false;
+  const forwardLog = m => {
+    const line = String(m);
+    send('game-log', line);
+    if (!sessionErrorSent && SESSION_ERROR_RE.test(line)) {
+      sessionErrorSent = true;
+      send('session-invalid');
+    }
+  };
+  launcher.on('debug', forwardLog);
+  launcher.on('data', forwardLog);
   launcher.on('progress', e =>
     send('launch-progress', { label: `Downloading ${e.type}`, current: e.task, total: e.total })
   );
@@ -684,6 +739,7 @@ function handle(channel, fn) {
 handle('silent-login', () => trySilentLogin());
 handle('list-accounts', () => listAccounts());
 handle('add-account', () => addAccount());
+handle('fix-session', () => fixSession());
 handle('switch-account', uuid => switchAccount(uuid));
 handle('remove-account', uuid => {
   removeAccount(uuid);
@@ -703,6 +759,14 @@ handle('set-config', updates => {
 handle('get-versions', () => getGameVersions());
 
 handle('list-packs', () => listPacks());
+// Manual rescue: re-read the config from disk and re-register any pack whose
+// folder exists but is missing from the list — same self-heal as startup, on
+// demand. Safe to run any time; changes nothing when all packs are present.
+handle('restore-packs', () => {
+  config = loadConfig();
+  writeStartupLog('restore-packs');
+  return listPacks();
+});
 handle('select-pack', id => {
   if (!packDef(id)) throw new Error('Unknown pack');
   config.selectedPack = id;
@@ -755,6 +819,11 @@ handle('open-game-folder', () => {
 handle('check-updates', () => autoUpdater.checkForUpdates());
 handle('install-update', () => autoUpdater.quitAndInstall());
 handle('get-app-version', () => app.getVersion());
+handle('get-env', () => ({
+  version: app.getVersion(),
+  sandboxed: IS_SANDBOXED,
+  root: GAME_ROOT
+}));
 
 // ---------- window / tray ----------
 
@@ -771,11 +840,14 @@ function showWindow() {
   if (!win.webContents.isLoading()) win.webContents.send('refresh-data');
 }
 
-// Records what loadConfig actually saw at startup, so a recurrence of the
-// "packs missing after restart" report is diagnosable from disk.
-function writeStartupLog() {
+// Records what loadConfig actually saw (at startup and on manual restores),
+// so a recurrence of the "packs missing after restart" report is diagnosable
+// from disk. Version + exe path + SANDBOXED flag identify exactly which
+// install and data root produced each entry.
+function writeStartupLog(event = 'startup') {
   try {
-    const line = `[${new Date().toISOString()}] root=${GAME_ROOT} `
+    const line = `[${new Date().toISOString()}] ${event} v${app.getVersion()} `
+      + `exe=${process.execPath} root=${GAME_ROOT}${IS_SANDBOXED ? ' SANDBOXED' : ''} `
       + `packs=${Object.keys(config.packs || {}).join(',') || '(none)'} `
       + `accounts=${(config.accounts || []).length} selected=${config.selectedPack}\n`;
     fs.appendFileSync(path.join(app.getPath('userData'), 'startup.log'), line);

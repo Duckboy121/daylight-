@@ -158,6 +158,44 @@ $('acct-add').addEventListener('click', async () => {
   }
 });
 
+// Forces a fresh Microsoft token (silent refresh, or full re-login if the
+// stored token is dead) — the cure for in-game "Invalid session" errors.
+async function fixSession(btn) {
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Fixing…';
+  try {
+    profile = await call('fixSession');
+    accounts = await call('listAccounts');
+    renderAccount();
+    renderAccountMenu();
+    $('session-bar').classList.add('hidden');
+    if (gameRunning) {
+      toast(`Session fixed for ${profile.name} — close and relaunch Minecraft to apply`);
+    } else {
+      toast(`Session fixed for ${profile.name} — launching…`);
+      doLaunch();
+    }
+  } catch (err) {
+    toast('Could not fix the session: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
+$('acct-fix').addEventListener('click', e => {
+  e.stopPropagation();
+  fixSession(e.currentTarget);
+});
+$('fix-session-btn').addEventListener('click', e => fixSession(e.currentTarget));
+
+// Main detected "Invalid session" / 401 in the game output.
+window.daylight.onSessionInvalid(() => {
+  $('session-bar').classList.remove('hidden');
+  toast('Minecraft reported an invalid session — click "Fix login" to repair it', true);
+});
+
 function updatePlayButton() {
   const btn = $('play-btn');
   if (gameRunning) {
@@ -221,6 +259,26 @@ $('pack-select').addEventListener('change', async e => {
   await call('selectPack', e.target.value);
   await refreshPacks();
 });
+
+// Manual rescue for the "packs missing after a restart" case: main re-reads
+// the config from disk and re-registers any pack folder it finds.
+async function restorePacks(sourceBtn) {
+  sourceBtn.disabled = true;
+  sourceBtn.classList.add('spin');
+  try {
+    packs = await call('restorePacks');
+    renderPackGrid();
+    await refreshPacks();
+    toast(`Packs restored — ${packs.length} pack${packs.length === 1 ? '' : 's'} found`);
+  } catch (err) {
+    toast('Restore failed: ' + err.message, true);
+  } finally {
+    sourceBtn.disabled = false;
+    sourceBtn.classList.remove('spin');
+  }
+}
+$('restore-packs-btn').addEventListener('click', e => restorePacks(e.currentTarget));
+$('restore-packs-home').addEventListener('click', e => restorePacks(e.currentTarget));
 
 function packCard(p) {
   const card = document.createElement('div');
@@ -345,7 +403,8 @@ $('pack-create-ok').addEventListener('click', async () => {
 
 // ---------- launch ----------
 
-$('play-btn').addEventListener('click', async () => {
+async function doLaunch() {
+  if (launching || gameRunning || !profile) return;
   launching = true;
   updatePlayButton();
   $('progress-wrap').classList.remove('hidden');
@@ -360,7 +419,9 @@ $('play-btn').addEventListener('click', async () => {
     launching = false;
     updatePlayButton();
   }
-});
+}
+
+$('play-btn').addEventListener('click', doLaunch);
 
 // ---------- game log card ----------
 
@@ -625,6 +686,13 @@ async function loadVersions(attempt = 0) {
 }
 
 (async function init() {
+  // 0. If this launch runs inside a dev sandbox (redirected %APPDATA%), say so
+  //    loudly — packs/logins created here never reach the normal install.
+  try {
+    const env = await call('getEnv');
+    if (env.sandboxed) $('sandbox-badge').classList.remove('hidden');
+  } catch { /* cosmetic only */ }
+
   // 1. Local data first — this reads config on disk and must NEVER be blocked
   //    by the network, or a cold boot hides the user's packs. Each step is
   //    independent so one failure can't skip the others, and packs retry.
