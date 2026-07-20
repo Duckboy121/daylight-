@@ -22,6 +22,7 @@
       <div id="acct-menu" class="acct-menu hidden">
         <div id="acct-list"></div>
         <button id="acct-add" class="acct-add">+ Add account</button>
+        <button id="acct-fix" class="acct-add" title="Refresh the Microsoft login token — fixes “Invalid session” in game">⟳ Fix login session</button>
       </div>
     </div>
 
@@ -49,10 +50,18 @@
         <div id="progress-label"></div>
       </div>
 
+      <div id="session-bar" class="session-bar hidden">
+        <span>Your Microsoft login session has expired — Minecraft will refuse server joins ("Invalid session").</span>
+        <button id="fix-session-btn" class="btn btn-small">Fix login</button>
+      </div>
+
       <div class="launch-bar">
         <div class="launch-pack">
           <label>PACK</label>
-          <select id="pack-select"></select>
+          <div class="pack-row">
+            <select id="pack-select"></select>
+            <button id="restore-packs-home" class="icon-btn" title="Packs missing? Restore them from disk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+          </div>
           <span id="pack-version" class="pack-version"></span>
         </div>
         <button id="play-btn" class="btn btn-launch" disabled>LOG IN TO PLAY</button>
@@ -75,7 +84,10 @@
 
     <!-- PACKS -->
     <section id="tab-packs" class="tab-panel">
-      <h2 class="page-title">Packs</h2>
+      <div class="packs-head">
+        <h2 class="page-title">Packs</h2>
+        <button id="restore-packs-btn" class="btn btn-small btn-ghost" title="Re-read the pack list from disk — use this if packs are missing after a restart">⟳ Restore packs</button>
+      </div>
       <div id="pack-grid" class="pack-grid"></div>
     </section>
 
@@ -141,6 +153,7 @@
   </main>
 
   <div id="toast" class="toast hidden"></div>
+  <div id="sandbox-badge" class="sandbox-badge hidden" title="This launch is running inside a development sandbox — packs and logins made here are isolated from your normal Daylight install">TEST SANDBOX · separate data</div>
 
   <!-- new pack dialog -->
   <dialog id="pack-dialog">
