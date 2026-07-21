@@ -205,6 +205,17 @@ let config = null;
 
 const RUNTIME_DIR = path.join(GAME_ROOT, 'runtime');
 
+// Per-OS specifics. The launcher targets Windows and Linux (macOS is best-
+// effort via the managed download path). Everything below keys off these.
+const IS_WIN = process.platform === 'win32';
+// The launcher binary: on Windows javaw.exe (no console window); on Unix
+// there's no separate "w" binary, plain `java` is used.
+const JAVA_BIN = IS_WIN ? 'javaw.exe' : 'java';
+// Adoptium API path components + the archive format it hands back per OS.
+const ADOPT_OS = IS_WIN ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
+const ADOPT_ARCH = process.arch === 'arm64' ? 'aarch64' : 'x64';
+const JRE_ARCHIVE_EXT = IS_WIN ? 'zip' : 'tar.gz';
+
 // Which Java major an MC version needs.
 function requiredJavaFor(mcVersion) {
   const head = Number(mcVersion.split('.')[0]);
@@ -218,22 +229,45 @@ function requiredJavaFor(mcVersion) {
   return 8;
 }
 
+// Directories that hold one JDK/JRE per subfolder, per OS. Each subfolder name
+// carries its major version (jdk-21, temurin-17-jre, zulu21.*, etc.).
+function javaSearchRoots() {
+  const home = require('os').homedir();
+  if (IS_WIN) {
+    return ['C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java',
+      'C:\\Program Files\\Microsoft', 'C:\\Program Files\\Zulu'];
+  }
+  if (process.platform === 'darwin') {
+    return ['/Library/Java/JavaVirtualMachines', path.join(home, 'Library/Java/JavaVirtualMachines')];
+  }
+  // Linux — distro packages, Adoptium's apt repo, SDKMAN, manual /opt installs.
+  return ['/usr/lib/jvm', '/usr/lib64/jvm', '/opt/java', '/opt',
+    path.join(home, '.sdkman/candidates/java')];
+}
+
+// javaw.exe on Windows; on macOS the runtime is nested under Contents/Home.
+function javaBinIn(dir) {
+  if (process.platform === 'darwin') {
+    const nested = path.join(dir, 'Contents', 'Home', 'bin', JAVA_BIN);
+    if (fs.existsSync(nested)) return nested;
+  }
+  return path.join(dir, 'bin', JAVA_BIN);
+}
+
 // Newest system JDK that satisfies the requirement. Old MC (Java 8 era)
 // breaks on modern JVMs, so for those only an exact major counts.
 function findSystemJava(need) {
-  const roots = ['C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java',
-    'C:\\Program Files\\Microsoft', 'C:\\Program Files\\Zulu'];
   let best = null;
   let bestVer = 0;
-  for (const root of roots) {
+  for (const root of javaSearchRoots()) {
     if (!fs.existsSync(root)) continue;
     for (const dir of fs.readdirSync(root)) {
-      const m = dir.match(/jdk-?(\d+)|jre-?(\d+)/i);
+      const m = dir.match(/jdk-?(\d+)|jre-?(\d+)|[a-z]+[-_]?(\d+)/i);
       if (!m) continue;
-      const ver = Number(m[1] || m[2]);
+      const ver = Number(m[1] || m[2] || m[3]);
       const ok = need >= 17 ? ver >= need : ver === need;
       if (!ok) continue;
-      const exe = path.join(root, dir, 'bin', 'javaw.exe');
+      const exe = javaBinIn(path.join(root, dir));
       if (ver > bestVer && fs.existsSync(exe)) {
         bestVer = ver;
         best = exe;
@@ -243,35 +277,39 @@ function findSystemJava(need) {
   return best;
 }
 
-// A runtime we downloaded ourselves lives under runtime/jdk-<major>/…/bin/javaw.exe
+// A runtime we downloaded ourselves lives under runtime/jdk-<major>/…/bin/<java>
 function findManagedJava(need) {
   const base = path.join(RUNTIME_DIR, `jdk-${need}`);
   if (!fs.existsSync(base)) return null;
-  const direct = path.join(base, 'bin', 'javaw.exe');
+  const direct = javaBinIn(base);
   if (fs.existsSync(direct)) return direct;
   for (const dir of fs.readdirSync(base)) {
-    const nested = path.join(base, dir, 'bin', 'javaw.exe');
+    const nested = javaBinIn(path.join(base, dir));
     if (fs.existsSync(nested)) return nested;
   }
   return null;
 }
 
-function extractZip(zip, dest) {
+// Unpacks the Adoptium archive: a .tar.gz on Linux/macOS, a .zip on Windows.
+// GNU tar auto-detects gzip with -xf; Windows' bsdtar reads zips the same way,
+// so `tar -xf` covers both. PowerShell's Expand-Archive is a Windows-only
+// fallback for the rare box without tar.
+function extractArchive(archive, dest) {
   const { execFile } = require('child_process');
   return new Promise((resolve, reject) => {
-    // Windows 10+ ships bsdtar, which reads zips; PowerShell is the fallback.
-    execFile('tar', ['-xf', zip, '-C', dest], err => {
+    execFile('tar', ['-xf', archive, '-C', dest], err => {
       if (!err) return resolve();
+      if (!IS_WIN) return reject(new Error('Could not extract Java runtime (tar failed): ' + err.message));
       execFile('powershell', ['-NoProfile', '-Command',
-        `Expand-Archive -LiteralPath "${zip}" -DestinationPath "${dest}" -Force`],
+        `Expand-Archive -LiteralPath "${archive}" -DestinationPath "${dest}" -Force`],
         err2 => err2 ? reject(new Error('Could not extract Java runtime: ' + err2.message)) : resolve());
     });
   });
 }
 
-// Returns a javaw.exe suitable for the given MC version, downloading a JRE
-// from Adoptium if the machine has nothing suitable — so a fresh PC can
-// install, log in and play with zero setup.
+// Returns a java binary suitable for the given MC version, downloading a JRE
+// from Adoptium if the machine has nothing suitable — so a fresh PC (Windows
+// or Linux) can install, log in and play with zero setup.
 async function ensureJava(mcVersion, progress) {
   if (config.javaPath) return config.javaPath;
   const need = requiredJavaFor(mcVersion);
@@ -279,14 +317,14 @@ async function ensureJava(mcVersion, progress) {
   if (found) return found;
 
   progress(`Downloading Java ${need}`, 0, 1);
-  const url = `https://api.adoptium.net/v3/binary/latest/${need}/ga/windows/x64/jre/hotspot/normal/eclipse`;
+  const url = `https://api.adoptium.net/v3/binary/latest/${need}/ga/${ADOPT_OS}/${ADOPT_ARCH}/jre/hotspot/normal/eclipse`;
   const res = await fetch(url, { redirect: 'follow' });
   if (!res.ok) throw new Error(`Java ${need} download failed (HTTP ${res.status}) — set a Java path in Settings`);
   const total = Number(res.headers.get('content-length')) || 0;
 
   fs.mkdirSync(RUNTIME_DIR, { recursive: true });
-  const zipPath = path.join(RUNTIME_DIR, `jre-${need}.zip`);
-  const out = fs.createWriteStream(zipPath);
+  const archivePath = path.join(RUNTIME_DIR, `jre-${need}.${JRE_ARCHIVE_EXT}`);
+  const out = fs.createWriteStream(archivePath);
   let got = 0;
   for await (const chunk of res.body) {
     got += chunk.length;
@@ -299,8 +337,8 @@ async function ensureJava(mcVersion, progress) {
   const destDir = path.join(RUNTIME_DIR, `jdk-${need}`);
   fs.rmSync(destDir, { recursive: true, force: true });
   fs.mkdirSync(destDir, { recursive: true });
-  await extractZip(zipPath, destDir);
-  fs.rmSync(zipPath, { force: true });
+  await extractArchive(archivePath, destDir);
+  fs.rmSync(archivePath, { force: true });
 
   const exe = findManagedJava(need);
   if (!exe) throw new Error('Java install failed — set a Java path in Settings');

@@ -1,0 +1,40 @@
+name: Build Linux AppImage
+
+# Produces the Linux AppImage on a real Linux runner (the launcher is released
+# from a Windows machine, which can't build it) and attaches it — plus the
+# latest-linux.yml auto-update metadata — to the GitHub release.
+#
+# Fires automatically when a release is published (the moment `npm run release`
+# flips the draft public), and can be run by hand from the Actions tab for any
+# existing tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # lets electron-builder upload assets to the release
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate icons
+        run: npm run icons
+
+      - name: Build and publish AppImage
+        run: npx electron-builder --linux AppImage --publish always
+        env:
+          # The built-in token can create/update releases in this repo; no PAT
+          # or manual secret needed.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -41,6 +41,18 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Game",
+      "synopsis": "Custom Minecraft launcher: modpacks, Fabric mods, modules and Microsoft login",
+      "desktop": {
+        "entry": {
+          "Name": "Daylight",
+          "Comment": "Custom Minecraft launcher"
+        }
+      }
     }
   },
   "dependencies": {
