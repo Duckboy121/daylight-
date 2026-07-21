@@ -41,6 +41,33 @@ The installer lands in `dist/Daylight Setup <version>.exe`. The app keeps
 running in the system tray when you close the window — reopen it from the
 tray icon, quit from the tray menu.
 
+## Install on Linux
+
+One command downloads the latest AppImage, adds a `daylight` command and an
+application-menu entry (no root, no package manager):
+
+```
+curl -fsSL https://raw.githubusercontent.com/Duckboy121/daylight-/main/install.sh | bash
+```
+
+Then launch it with `daylight` or from your apps menu. Re-run the same command
+any time to update. Prefer to grab the file yourself? Download
+`Daylight-<version>.AppImage` from the
+[Releases page](https://github.com/Duckboy121/daylight-/releases/latest),
+`chmod +x` it, and run it.
+
+AppImages need **FUSE 2** to run (`sudo apt install libfuse2`, `dnf install
+fuse`, or `pacman -S fuse2`); the installer detects a missing FUSE and prints
+the fix. Without it you can still run `daylight --appimage-extract-and-run`.
+Zero-setup Java applies here too — the launcher downloads the right JRE from
+Adoptium if your machine has none.
+
+The Linux AppImage is built on a Linux CI runner
+(`.github/workflows/build-linux.yml`) and attached to each GitHub release
+automatically, so the Windows release flow and the Linux download stay in sync.
+Auto-update works when running the AppImage (via `latest-linux.yml` on the
+release).
+
 ## Packs
 
 Every pack — including ones you create — automatically includes the Daylight
@@ -114,9 +141,10 @@ Requires JDK 25 (MC 26.x is Java 25).
 
 ## Java
 
-MC 26.x needs **Java 25** — the launcher auto-detects the newest JDK under
-`Program Files\Eclipse Adoptium` / `Program Files\Java`, or set an explicit
-path in Settings.
+MC 26.x needs **Java 25** — the launcher auto-detects a suitable JDK (on
+Windows under `Program Files\Eclipse Adoptium` / `Program Files\Java`; on Linux
+under `/usr/lib/jvm`, `/opt`, SDKMAN, etc.), downloads the right JRE from
+Adoptium if none is found, or you can set an explicit path in Settings.
 
 ## Microsoft login — your own Azure app (for distribution)
 

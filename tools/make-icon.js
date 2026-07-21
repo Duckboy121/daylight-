@@ -147,4 +147,6 @@ fs.mkdirSync(path.join(root, 'src', 'assets'), { recursive: true });
 fs.writeFileSync(path.join(root, 'build', 'icon.ico'), encodeIco(png256));
 fs.writeFileSync(path.join(root, 'src', 'assets', 'icon.png'), png256);
 fs.writeFileSync(path.join(root, 'src', 'assets', 'tray.png'), encodePng(drawIcon(32), 32));
-console.log('icons written: build/icon.ico, src/assets/icon.png, src/assets/tray.png');
+// Linux AppImage wants a 512px PNG (electron-builder picks up build/icon.png).
+fs.writeFileSync(path.join(root, 'build', 'icon.png'), encodePng(drawIcon(512), 512));
+console.log('icons written: build/icon.ico, build/icon.png, src/assets/icon.png, src/assets/tray.png');

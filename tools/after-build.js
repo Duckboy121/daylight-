@@ -6,6 +6,9 @@ const path = require('path');
 const DEST = 'C:\\Users\\Alexj\\Documents\\day';
 
 exports.default = function (buildResult) {
+  // Windows-only convenience (copies the .exe to a local share folder). On the
+  // Linux CI runner there's no such path and no .exe — skip entirely.
+  if (process.platform !== 'win32') return [];
   fs.mkdirSync(DEST, { recursive: true });
   const copied = [];
   for (const file of buildResult.artifactPaths) {
