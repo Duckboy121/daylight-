@@ -32,9 +32,28 @@ jobs:
       - name: Generate icons
         run: npm run icons
 
-      - name: Build and publish AppImage
+      # Build the AppImage. --publish always makes electron-builder also emit
+      # dist/latest-linux.yml (the auto-update feed). It won't upload to an
+      # already-published release itself (its default publish type is draft,
+      # which it deems "incompatible" with a published release), so the upload
+      # is done explicitly below — that keeps the Windows draft-based release
+      # flow (npm run release + publish-release.js) untouched.
+      - name: Build AppImage
         run: npx electron-builder --linux AppImage --publish always
         env:
-          # The built-in token can create/update releases in this repo; no PAT
-          # or manual secret needed.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attach AppImage to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="v$(node -p "require('./package.json').version")"
+          fi
+          echo "Attaching Linux assets to $TAG"
+          gh release upload "$TAG" dist/*.AppImage --clobber --repo "$GITHUB_REPOSITORY"
+          if [ -f dist/latest-linux.yml ]; then
+            gh release upload "$TAG" dist/latest-linux.yml --clobber --repo "$GITHUB_REPOSITORY"
+          fi
