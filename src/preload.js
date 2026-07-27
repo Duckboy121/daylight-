@@ -30,10 +30,17 @@ contextBridge.exposeInMainWorld('daylight', {
   openModsFolder: packId => invoke('open-mods-folder', packId),
   openGameFolder: () => invoke('open-game-folder'),
 
+  searchResourcePacks: (query, packId) => invoke('search-resourcepacks', { query, packId }),
+  installResourcePack: (projectId, packId) => invoke('install-resourcepack', { projectId, packId }),
+  listResourcePacks: packId => invoke('list-resourcepacks', packId),
+  deleteResourcePack: (filename, packId) => invoke('delete-resourcepack', { filename, packId }),
+  openResourcePacksFolder: packId => invoke('open-resourcepacks-folder', packId),
+
   checkUpdates: () => invoke('check-updates'),
   installUpdate: () => invoke('install-update'),
   getAppVersion: () => invoke('get-app-version'),
   getEnv: () => invoke('get-env'),
+  windowControl: action => ipcRenderer.send('window-control', action),
 
   onProgress: cb => on('launch-progress', cb),
   onGameLog: cb => on('game-log', cb),
