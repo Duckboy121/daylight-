@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const crypto = require('crypto');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { Client } = require('minecraft-launcher-core');
@@ -465,6 +467,46 @@ async function fixSession() {
   return addAccount();
 }
 
+// ---------- in-game session bridge ----------
+//
+// A running Minecraft client can't refresh its own Microsoft token (the refresh
+// token lives here in the launcher). This tiny loopback server lets the in-game
+// Daylight mod ask the launcher — which stays alive in the tray — to mint a
+// fresh Minecraft access token so its title-screen "Fix session" button can
+// swap it into the live session and cure "Invalid session" without a restart.
+//
+// Bound to 127.0.0.1 and gated by a per-run secret handed to the game as a JVM
+// -D property. The MC access token is already on the game's own command line
+// (MCLC passes --accessToken), so this exposes nothing a local process couldn't
+// already read.
+let bridgePort = 0;
+const bridgeSecret = crypto.randomBytes(24).toString('hex');
+
+function startSessionBridge() {
+  const server = http.createServer((req, res) => {
+    const reply = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(obj));
+    };
+    if (req.method !== 'POST' || req.url !== '/refresh-session'
+        || req.headers['x-daylight-secret'] !== bridgeSecret) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    (async () => {
+      if (!config.activeUuid) throw new Error('No account is signed in');
+      await switchAccount(config.activeUuid); // refresh + persist
+      const t = minecraftToken.mclc();
+      return { accessToken: t.access_token, uuid: t.uuid, name: t.name };
+    })()
+      .then(data => reply({ ok: true, ...data }))
+      .catch(err => reply({ ok: false, error: err.message || String(err) }));
+  });
+  server.on('error', () => { bridgePort = 0; }); // bridge is best-effort
+  server.listen(0, '127.0.0.1', () => { bridgePort = server.address().port; });
+}
+
 // ---------- fabric / versions ----------
 
 async function fetchJson(url) {
@@ -539,6 +581,10 @@ function packDir(id) {
 
 function packModsDir(id) {
   return path.join(packDir(id), 'mods');
+}
+
+function packResourcePacksDir(id) {
+  return path.join(packDir(id), 'resourcepacks');
 }
 
 function listPacks() {
@@ -642,8 +688,9 @@ async function searchMods(query, packId) {
     ['categories:fabric'],
     [`versions:${pack.version}`]
   ]);
+  // Fetch a wide batch; the renderer paginates it 20 at a time.
   const data = await fetchJson(
-    `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=20&facets=${encodeURIComponent(facets)}`
+    `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=60&facets=${encodeURIComponent(facets)}`
   );
   return data.hits.map(h => ({
     id: h.project_id,
@@ -652,6 +699,57 @@ async function searchMods(query, packId) {
     downloads: h.downloads,
     icon: h.icon_url
   }));
+}
+
+// ---------- resource packs (Modrinth) ----------
+//
+// Resource packs aren't loader-specific, so unlike mods they resolve by game
+// version alone (no 'fabric' facet), and install into the pack's own
+// resourcepacks/ folder rather than mods/.
+
+async function searchResourcePacks(query, packId) {
+  const pack = packDef(packId || config.selectedPack);
+  const facets = JSON.stringify([
+    ['project_type:resourcepack'],
+    [`versions:${pack.version}`]
+  ]);
+  // Fetch a wide batch; the renderer paginates it 20 at a time.
+  const data = await fetchJson(
+    `${MODRINTH_API}/search?query=${encodeURIComponent(query)}&limit=60&facets=${encodeURIComponent(facets)}`
+  );
+  return data.hits.map(h => ({
+    id: h.project_id,
+    title: h.title,
+    description: h.description,
+    downloads: h.downloads,
+    icon: h.icon_url
+  }));
+}
+
+async function resolveResourcePackFile(projectId, mcVersion) {
+  const versions = await fetchJson(
+    `${MODRINTH_API}/project/${projectId}/version?game_versions=${encodeURIComponent(JSON.stringify([mcVersion]))}`
+  );
+  if (!versions.length) return null;
+  return versions[0].files.find(f => f.primary) || versions[0].files[0];
+}
+
+async function installResourcePack(projectId, packId) {
+  const pack = packDef(packId || config.selectedPack);
+  const file = await resolveResourcePackFile(projectId, pack.version);
+  if (!file) throw new Error('No build of this resource pack for ' + pack.version);
+  const dir = packResourcePacksDir(pack.id);
+  fs.mkdirSync(dir, { recursive: true });
+  await downloadFile(file.url, path.join(dir, file.filename));
+  return file.filename;
+}
+
+function listResourcePacks(packId) {
+  const dir = packResourcePacksDir(packId);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter(f => f.endsWith('.zip') || fs.statSync(path.join(dir, f)).isDirectory())
+    .map(f => ({ file: f }));
 }
 
 async function installMod(projectId, packId) {
@@ -741,12 +839,20 @@ async function launchGame() {
   const javaPath = await ensureJava(pack.version, (label, current, total) =>
     send('launch-progress', { label, current, total })
   );
+
+  // Hand the in-game mod the loopback bridge coordinates so its "Fix session"
+  // button can reach the launcher (see startSessionBridge). Only when the
+  // bridge actually came up.
+  const bridgeArgs = bridgePort
+    ? [`-Ddaylight.session.port=${bridgePort}`, `-Ddaylight.session.secret=${bridgeSecret}`]
+    : [];
+
   const proc = await launcher.launch({
     root: GAME_ROOT,
     authorization: minecraftToken.mclc(),
     version: { number: pack.version, type: 'release', custom: fabricId },
     memory: { min: `${config.minRam}G`, max: `${config.maxRam}G` },
-    customArgs: JVM_FLAGS,
+    customArgs: [...JVM_FLAGS, ...bridgeArgs],
     overrides: { gameDirectory: packDir(pack.id) },
     ...(javaPath ? { javaPath } : {})
   });
@@ -849,6 +955,20 @@ handle('open-mods-folder', packId => {
   fs.mkdirSync(dir, { recursive: true });
   shell.openPath(dir);
 });
+
+handle('search-resourcepacks', ({ query, packId }) => searchResourcePacks(query, packId));
+handle('install-resourcepack', ({ projectId, packId }) => installResourcePack(projectId, packId));
+handle('list-resourcepacks', packId => listResourcePacks(packId || config.selectedPack));
+handle('delete-resourcepack', ({ filename, packId }) => {
+  const base = path.basename(filename);
+  const target = path.join(packResourcePacksDir(packId || config.selectedPack), base);
+  if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+});
+handle('open-resourcepacks-folder', packId => {
+  const dir = packResourcePacksDir(packId || config.selectedPack);
+  fs.mkdirSync(dir, { recursive: true });
+  shell.openPath(dir);
+});
 handle('open-game-folder', () => {
   fs.mkdirSync(GAME_ROOT, { recursive: true });
   shell.openPath(GAME_ROOT);
@@ -892,13 +1012,22 @@ function writeStartupLog(event = 'startup') {
   } catch { /* non-fatal */ }
 }
 
+// Custom title-bar controls (the window is frameless).
+ipcMain.on('window-control', (_e, action) => {
+  if (!win || win.isDestroyed()) return;
+  if (action === 'minimize') win.minimize();
+  else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
+  else if (action === 'close') win.close(); // hides to tray via the close handler
+});
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1080,
-    height: 680,
-    minWidth: 900,
-    minHeight: 600,
-    backgroundColor: '#0a0d13',
+    width: 1120,
+    height: 710,
+    minWidth: 940,
+    minHeight: 620,
+    backgroundColor: '#08090c',
+    frame: false,            // custom title bar (see .topbar in the renderer)
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
@@ -953,6 +1082,7 @@ if (!gotLock) {
   app.whenReady().then(() => {
     config = loadConfig();
     writeStartupLog();
+    startSessionBridge();
     createWindow();
     createTray();
     if (app.isPackaged) initUpdater();

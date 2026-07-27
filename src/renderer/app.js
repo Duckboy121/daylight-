@@ -56,8 +56,15 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.add('active');
     $('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'mods') refreshModsTab();
+    if (btn.dataset.tab === 'resourcepacks') refreshRpTab();
     if (btn.dataset.tab === 'packs') renderPackGrid();
   });
+});
+
+// ---------- window controls (frameless) ----------
+
+document.querySelectorAll('.win-btn').forEach(btn => {
+  btn.addEventListener('click', () => window.daylight.windowControl(btn.dataset.win));
 });
 
 // ---------- account switcher ----------
@@ -465,6 +472,80 @@ function modItem(children) {
   return li;
 }
 
+// ---------- shared paginated search results (mods + resource packs) ----------
+
+const PER_PAGE = 20;
+
+// One search-result row: icon, title/description, Install button.
+function resultCard(hit, onInstall) {
+  const row = document.createElement('div');
+  row.className = 'mod-item';
+
+  const icon = document.createElement('img');
+  icon.src = hit.icon || '';
+  icon.alt = '';
+
+  const meta = document.createElement('div');
+  meta.className = 'mod-meta';
+  const title = document.createElement('div');
+  title.className = 'mod-title';
+  title.textContent = hit.title;
+  const desc = document.createElement('div');
+  desc.className = 'mod-desc';
+  const d = hit.description || '';
+  desc.textContent = d.length > 90 ? d.slice(0, 90).trimEnd() + '…' : d;
+  desc.title = d;
+  meta.append(title, desc);
+
+  const install = document.createElement('button');
+  install.className = 'btn btn-small';
+  install.textContent = 'Install';
+  install.addEventListener('click', async () => {
+    install.disabled = true;
+    install.textContent = '…';
+    try {
+      await onInstall(hit.id);
+      install.textContent = 'Installed';
+    } catch (err) {
+      toast(err.message, true);
+      install.disabled = false;
+      install.textContent = 'Install';
+    }
+  });
+
+  row.append(icon, meta, install);
+  return row;
+}
+
+// Renders one page (PER_PAGE items) of state.hits into container, with prev/next
+// controls in pager. state = { hits, page }.
+function renderResultsPage(state, container, pager, onInstall) {
+  container.innerHTML = '';
+  const hits = state.hits;
+  if (!hits.length) { pager.classList.add('hidden'); return; }
+  const pageCount = Math.ceil(hits.length / PER_PAGE);
+  state.page = Math.max(0, Math.min(state.page, pageCount - 1));
+  for (const hit of hits.slice(state.page * PER_PAGE, state.page * PER_PAGE + PER_PAGE)) {
+    container.append(resultCard(hit, onInstall));
+  }
+
+  pager.innerHTML = '';
+  if (pageCount <= 1) { pager.classList.add('hidden'); return; }
+  const prev = document.createElement('button');
+  prev.textContent = 'Prev';
+  prev.disabled = state.page === 0;
+  prev.addEventListener('click', () => { state.page--; renderResultsPage(state, container, pager, onInstall); container.scrollIntoView({ block: 'nearest' }); });
+  const info = document.createElement('span');
+  info.className = 'pager-info';
+  info.textContent = `Page ${state.page + 1} / ${pageCount}`;
+  const next = document.createElement('button');
+  next.textContent = 'Next';
+  next.disabled = state.page >= pageCount - 1;
+  next.addEventListener('click', () => { state.page++; renderResultsPage(state, container, pager, onInstall); container.scrollIntoView({ block: 'nearest' }); });
+  pager.append(prev, info, next);
+  pager.classList.remove('hidden');
+}
+
 function currentModsPack() {
   return packs.find(p => p.id === modsPackId) || selectedPack();
 }
@@ -548,57 +629,27 @@ async function refreshInstalledMods() {
   }
 }
 
+const modSearch = { hits: [], page: 0 };
 async function searchMods() {
   const query = $('mod-search').value.trim();
   if (!query) return;
   const list = $('mod-results');
-  list.innerHTML = '<li class="mod-item"><span class="mod-desc">Searching…</span></li>';
+  const pager = $('mod-pager');
+  list.innerHTML = '<div class="mod-item"><span class="mod-desc">Searching…</span></div>';
+  pager.classList.add('hidden');
   try {
-    const hits = await call('searchMods', query, modsPackId);
-    list.innerHTML = '';
-    if (!hits.length) {
-      list.innerHTML = '<li class="mod-item"><span class="mod-desc">No results for this version</span></li>';
+    modSearch.hits = await call('searchMods', query, modsPackId);
+    modSearch.page = 0;
+    if (!modSearch.hits.length) {
+      list.innerHTML = '<div class="mod-item"><span class="mod-desc">No results for this version</span></div>';
       return;
     }
-    for (const hit of hits) {
-      const icon = document.createElement('img');
-      icon.src = hit.icon || '';
-      icon.alt = '';
-
-      const meta = document.createElement('div');
-      meta.className = 'mod-meta';
-      const title = document.createElement('div');
-      title.className = 'mod-title';
-      title.textContent = hit.title;
-      const desc = document.createElement('div');
-      desc.className = 'mod-desc';
-      desc.textContent = hit.description.length > 90
-        ? hit.description.slice(0, 90).trimEnd() + '…'
-        : hit.description;
-      desc.title = hit.description;
-      meta.append(title, desc);
-
-      const install = document.createElement('button');
-      install.className = 'btn btn-small';
-      install.textContent = 'Install';
-      install.addEventListener('click', async () => {
-        install.disabled = true;
-        install.textContent = '…';
-        try {
-          const file = await call('installMod', hit.id, modsPackId);
-          toast(`Installed ${file} → ${currentModsPack().name}`);
-          refreshInstalledMods();
-          refreshPacks();
-          install.textContent = 'Installed';
-        } catch (err) {
-          toast(err.message, true);
-          install.disabled = false;
-          install.textContent = 'Install';
-        }
-      });
-
-      list.append(modItem([icon, meta, install]));
-    }
+    renderResultsPage(modSearch, list, pager, async id => {
+      const file = await call('installMod', id, modsPackId);
+      toast(`Installed ${file} → ${currentModsPack().name}`);
+      refreshInstalledMods();
+      refreshPacks();
+    });
   } catch (err) {
     list.innerHTML = '';
     toast('Search failed: ' + err.message, true);
@@ -608,6 +659,98 @@ async function searchMods() {
 $('mod-search-btn').addEventListener('click', searchMods);
 $('mod-search').addEventListener('keydown', e => { if (e.key === 'Enter') searchMods(); });
 $('open-mods-btn').addEventListener('click', () => call('openModsFolder', modsPackId));
+
+// ---------- resource packs ----------
+
+let rpPackId = null;
+const rpSearch = { hits: [], page: 0 };
+
+function currentRpPack() {
+  return packs.find(p => p.id === rpPackId) || selectedPack();
+}
+
+function refreshRpTab() {
+  const select = $('rp-pack-select');
+  if (!rpPackId || !packs.some(p => p.id === rpPackId)) {
+    rpPackId = (selectedPack() || packs[0])?.id;
+  }
+  select.innerHTML = '';
+  for (const p of packs) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    select.append(opt);
+  }
+  if (rpPackId) select.value = rpPackId;
+  const pack = currentRpPack();
+  $('rp-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
+  refreshInstalledRp();
+}
+
+$('rp-pack-select').addEventListener('change', e => {
+  rpPackId = e.target.value;
+  const pack = currentRpPack();
+  $('rp-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
+  $('rp-results').innerHTML = '';
+  $('rp-pager').classList.add('hidden');
+  refreshInstalledRp();
+});
+
+async function refreshInstalledRp() {
+  const installed = await call('listResourcePacks', rpPackId);
+  const list = $('rp-installed');
+  list.innerHTML = '';
+  if (!installed.length) {
+    const li = document.createElement('li');
+    li.className = 'mod-item';
+    li.innerHTML = '<span class="mod-desc">No resource packs installed</span>';
+    list.append(li);
+    return;
+  }
+  for (const rp of installed) {
+    const name = document.createElement('span');
+    name.className = 'mod-file';
+    name.textContent = rp.file;
+    name.title = rp.file;
+    const del = document.createElement('button');
+    del.className = 'btn btn-small btn-danger';
+    del.textContent = 'Remove';
+    del.addEventListener('click', async () => {
+      await call('deleteResourcePack', rp.file, rpPackId);
+      refreshInstalledRp();
+    });
+    list.append(modItem([name, del]));
+  }
+}
+
+async function searchResourcePacks() {
+  const query = $('rp-search').value.trim();
+  if (!query) return;
+  const list = $('rp-results');
+  const pager = $('rp-pager');
+  list.innerHTML = '<div class="mod-item"><span class="mod-desc">Searching…</span></div>';
+  pager.classList.add('hidden');
+  try {
+    rpSearch.hits = await call('searchResourcePacks', query, rpPackId);
+    rpSearch.page = 0;
+    if (!rpSearch.hits.length) {
+      list.innerHTML = '<div class="mod-item"><span class="mod-desc">No results for this version</span></div>';
+      return;
+    }
+    renderResultsPage(rpSearch, list, pager, async id => {
+      const file = await call('installResourcePack', id, rpPackId);
+      toast(`Installed ${file} → ${currentRpPack().name}`);
+      refreshInstalledRp();
+    });
+  } catch (err) {
+    list.innerHTML = '';
+    toast('Search failed: ' + err.message, true);
+  }
+}
+
+$('rp-search-btn').addEventListener('click', searchResourcePacks);
+$('rp-search').addEventListener('keydown', e => { if (e.key === 'Enter') searchResourcePacks(); });
+$('open-rp-btn').addEventListener('click', () => call('openResourcePacksFolder', rpPackId));
 
 // ---------- settings ----------
 
@@ -619,6 +762,8 @@ async function loadSettings() {
   $('azure-id').value = cfg.azureClientId;
   const version = await call('getAppVersion');
   $('app-version').textContent = `(v${version})`;
+  const sideVer = $('app-version-side');
+  if (sideVer) sideVer.textContent = `Daylight v${version}`;
 }
 
 $('save-settings').addEventListener('click', async () => {
