@@ -94,7 +94,7 @@ const RAM = defaultRam();
 const BUILTIN_PACKS = {
   daylight: {
     name: 'Daylight',
-    desc: 'Daylight modules, emotes & FPS boost'
+    desc: 'Daylight modules, HUD & FPS boost'
   }
 };
 

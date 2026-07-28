@@ -5,7 +5,7 @@ A custom Minecraft launcher + client mod, Lunar/Dawn style.
 **Launcher** (this repo, Electron): Microsoft login, modpack profiles, Modrinth
 mod manager, optimized launching. Default MC version: **1.21.11**.
 **Mod** (two builds): in-game module GUI on <kbd>Right Shift</kbd> — HUD
-modules, zoom, fullbright, toggle sprint, emotes.
+modules, zoom, fullbright, toggle sprint and more.
 - `../daylight-mod-1.21.11` — MC 1.21.11 (yarn, loom 1.16, Java 21)
 - `../daylight-mod` — MC 26.2 (unobfuscated/official names, loom 1.17, Java 25)
 
@@ -124,15 +124,13 @@ from the bundled Sodium/Lithium stack (typically 2x+ vanilla).
 ## The Daylight mod (in game)
 
 - <kbd>Right Shift</kbd> — module GUI: toggle modules, **drag HUD elements**
-  to reposition them, play emotes
+  to reposition them
 - <kbd>C</kbd> (hold) — zoom
 - <kbd>V</kbd> (hold) — **Freelook**: third-person camera orbits with the
   mouse while your player keeps facing/walking the same direction
   (camera-only; note some public servers disallow freelook)
 - Modules: FPS, CPS, Keystrokes, Coordinates, Ping, Clock, Armor HUD,
   Toggle Sprint, Zoom, Freelook, Fullbright
-- Emotes: Wave, Spin, Bow — driven through real player state (swings,
-  rotation, sneak), so other players see them
 - Config saves to `config/daylight.json` in the pack folder
 
 To rebuild the mod after changes: `cd ../daylight-mod && gradlew build`, then

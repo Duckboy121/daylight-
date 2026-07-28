@@ -605,7 +605,7 @@ async function refreshInstalledMods() {
   for (const mod of mods) {
     const name = document.createElement('span');
     name.className = 'mod-file';
-    name.textContent = mod.builtin ? 'Daylight (modules, emotes, freelook)' : mod.file;
+    name.textContent = mod.builtin ? 'Daylight (modules, HUD, freelook)' : mod.file;
     name.title = mod.file;
 
     if (mod.builtin) {
