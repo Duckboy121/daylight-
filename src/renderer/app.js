@@ -309,6 +309,15 @@ function packCard(p) {
   desc.className = 'pack-desc';
   desc.textContent = p.desc;
 
+  // Say up front when this MC version has no Daylight mod build — the pack
+  // still works, it just gets the performance mods only.
+  if (!p.hasMod) {
+    const warn = document.createElement('div');
+    warn.className = 'pack-nomod';
+    warn.textContent = `No Daylight mod for ${p.version} — performance mods only`;
+    desc.append(warn);
+  }
+
   const meta = document.createElement('div');
   meta.className = 'pack-meta';
   if (p.pinned) {

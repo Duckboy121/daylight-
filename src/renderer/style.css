@@ -382,6 +382,7 @@ select { cursor: pointer; }
 .pack-card.selected { border-color: rgba(245,165,36,.6); box-shadow: 0 0 26px rgba(245,165,36,.12); }
 .pack-card h3 { font-size: 16px; font-weight: 700; }
 .pack-card .pack-desc { font-size: 12.5px; color: var(--dim); flex: 1; line-height: 1.5; }
+.pack-card .pack-nomod { margin-top: 6px; font-size: 11.5px; color: var(--sun); }
 .pack-card .pack-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); }
 .pack-card select { padding: 5px 8px; font-size: 12px; }
 .pack-badge { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--accent); border: 1px solid var(--accent-dark); padding: 2px 9px; border-radius: 999px; }
