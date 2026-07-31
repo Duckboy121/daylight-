@@ -571,7 +571,10 @@ function packDef(id) {
     pinned: !!builtin?.pinnedVersion,
     modrinth: PERF_MODS,
     bundled: true,
-    builtin: !!builtin
+    builtin: !!builtin,
+    // Whether a Daylight mod build exists for this pack's MC version — the UI
+    // says so up front instead of the mod quietly not being there.
+    hasMod: !!modBuildFor(builtin?.pinnedVersion || state.version || DEFAULT_MC_VERSION)
   };
 }
 
@@ -614,9 +617,12 @@ async function downloadFile(url, dest) {
 // and can clean up on version change.
 function loadManifest(packId) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(packDir(packId), 'installed.json'), 'utf8'));
+    const m = JSON.parse(fs.readFileSync(path.join(packDir(packId), 'installed.json'), 'utf8'));
+    m.files = m.files || {};
+    m.removed = m.removed || []; // auto-installed mods the user deleted on purpose
+    return m;
   } catch {
-    return { mcVersion: null, files: {} };
+    return { mcVersion: null, files: {}, removed: [] };
   }
 }
 
@@ -651,6 +657,7 @@ async function ensurePackReady(pack, progress) {
   const slugs = pack.modrinth;
   for (let i = 0; i < slugs.length; i++) {
     const slug = slugs[i];
+    if (manifest.removed.includes(slug)) continue; // user deleted it — respect that
     const existing = manifest.files[slug];
     if (existing && fs.existsSync(path.join(modsDir, existing))) continue;
     progress(`Installing ${slug} (${i + 1}/${slugs.length})`, i, slugs.length);
@@ -759,6 +766,21 @@ async function installMod(projectId, packId) {
   const modsDir = packModsDir(pack.id);
   fs.mkdirSync(modsDir, { recursive: true });
   await downloadFile(file.url, path.join(modsDir, file.filename));
+
+  // Installing one of the auto-installed mods again clears its "removed" mark,
+  // so it resumes being kept up to date on launch.
+  const manifest = loadManifest(pack.id);
+  if (manifest.removed.length) {
+    try {
+      const { slug } = await fetchJson(`${MODRINTH_API}/project/${projectId}`);
+      const i = manifest.removed.indexOf(slug);
+      if (i !== -1) {
+        manifest.removed.splice(i, 1);
+        manifest.files[slug] = file.filename;
+        saveManifest(pack.id, manifest);
+      }
+    } catch { /* not one of ours, or offline — nothing to un-mark */ }
+  }
   return file.filename;
 }
 
@@ -947,8 +969,20 @@ handle('list-mods', packId => listMods(packId || config.selectedPack));
 handle('delete-mod', ({ filename, packId }) => {
   const base = path.basename(filename);
   if (base === DAYLIGHT_JAR) throw new Error('The Daylight mod is built-in and cannot be removed');
-  const target = path.join(packModsDir(packId || config.selectedPack), base);
+  const id = packId || config.selectedPack;
+  const target = path.join(packModsDir(id), base);
   if (fs.existsSync(target)) fs.unlinkSync(target);
+
+  // If this was one of the auto-installed mods, remember that the user removed
+  // it so the next launch doesn't silently download it again. Only the Daylight
+  // mod itself is unconditionally restored.
+  const manifest = loadManifest(id);
+  const slug = Object.keys(manifest.files).find(s => manifest.files[s] === base);
+  if (slug) {
+    delete manifest.files[slug];
+    if (!manifest.removed.includes(slug)) manifest.removed.push(slug);
+    saveManifest(id, manifest);
+  }
 });
 handle('open-mods-folder', packId => {
   const dir = packModsDir(packId || config.selectedPack);
