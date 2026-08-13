@@ -4,10 +4,31 @@ A custom Minecraft launcher + client mod, Lunar/Dawn style.
 
 **Launcher** (this repo, Electron): Microsoft login, modpack profiles, Modrinth
 mod manager, optimized launching. Default MC version: **1.21.11**.
-**Mod** (two builds): in-game module GUI on <kbd>Right Shift</kbd> — HUD
-modules, zoom, fullbright, toggle sprint and more.
-- `../daylight-mod-1.21.11` — MC 1.21.11 (yarn, loom 1.16, Java 21)
-- `../daylight-mod` — MC 26.2 (unobfuscated/official names, loom 1.17, Java 25)
+**Mod**: in-game module GUI on <kbd>Right Shift</kbd> — HUD modules, zoom,
+fullbright, toggle sprint and more. It ships for **every version from 1.18 to
+1.21.11, plus 26.2** (28 builds).
+
+The mod source is organised per *API era*, not per version, because the client
+API changes shape underneath it. Each tree carries the same features, adapted:
+
+| Versions | Source tree | What differs |
+|---|---|---|
+| 26.2 | `../daylight-mod` | official (unobfuscated) names, Java 25 |
+| 1.21.9–1.21.11 | `../daylight-mod-1.21.11` | baseline: `Click`/`KeyInput` records, `HudElementRegistry` |
+| 1.21.6–1.21.8 | `../daylight-mod-1.21.8` | classic input signatures, String keybind categories |
+| 1.21–1.21.5 | `../daylight-mod-1.21.5` | `HudRenderCallback`, crosshair hidden by mixin |
+| 1.20.5–1.20.6 | `../daylight-mod-1.20` | Java 17 target |
+| 1.20–1.20.4 | `../daylight-mod-1.20.4` | no `client.session` package, pre-registry potions |
+| 1.19–1.19.4 | `../daylight-mod-1.19*` | **no `DrawContext`** — see the `Gfx` shim below |
+| 1.17.1–1.18.2 | `../daylight-mod-1.18*` | no `SimpleOption`, `LiteralText`, `key*` field names |
+
+Before 1.20 there is no `DrawContext`, which would otherwise mean rewriting
+every draw call. Instead those trees add `gg.daylight.client.compat.Gfx`, a
+shim that wraps `MatrixStack` behind the same method names the shared code
+already uses, so only the type changes.
+
+Each tree has a `matrix-build.sh` that resolves the right yarn mappings and
+Fabric API build per version automatically and drops the jars into `bundled/`.
 
 The launcher bundles a jar per version in `bundled/daylight-mod-<version>.jar`
 and drops the matching one into a pack's mods folder based on the pack's MC
