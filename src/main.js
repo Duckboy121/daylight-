@@ -638,6 +638,18 @@ async function resolveModrinthFile(slug, mcVersion) {
   return versions[0].files.find(f => f.primary) || versions[0].files[0];
 }
 
+// True when two files are byte-identical. Used for the built-in mod jar, where
+// a same-size-but-different build must still be copied over.
+function sameContents(a, b) {
+  try {
+    const ha = crypto.createHash('sha1').update(fs.readFileSync(a)).digest('hex');
+    const hb = crypto.createHash('sha1').update(fs.readFileSync(b)).digest('hex');
+    return ha === hb;
+  } catch {
+    return false;
+  }
+}
+
 async function ensurePackReady(pack, progress) {
   const modsDir = packModsDir(pack.id);
   fs.mkdirSync(modsDir, { recursive: true });
@@ -675,8 +687,10 @@ async function ensurePackReady(pack, progress) {
   const buildJar = modBuildFor(pack.version);
   if (pack.bundled && buildJar) {
     const src = path.join(BUNDLED_DIR, buildJar);
-    if (fs.existsSync(src)
-        && (!fs.existsSync(dest) || fs.statSync(src).size !== fs.statSync(dest).size)) {
+    // Compare contents, not size: a one-constant change (e.g. an FOV cap)
+    // produces a jar of exactly the same length, and a size check would then
+    // leave the stale jar in place forever.
+    if (fs.existsSync(src) && (!fs.existsSync(dest) || !sameContents(src, dest))) {
       fs.copyFileSync(src, dest);
     }
   } else if (fs.existsSync(dest)) {
