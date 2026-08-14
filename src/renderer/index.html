@@ -116,20 +116,20 @@
               </div>
             </div>
 
-            <!-- right info panel -->
+            <!-- right panel: what's new, page back through past releases -->
             <aside class="home-side">
-              <div class="side-head">INFO</div>
-              <div class="info-card">
-                <div class="info-title">Module GUI</div>
-                <div class="info-body">Press <kbd>Right Shift</kbd> in game to open modules and drag your HUD where you want it.</div>
+              <div class="side-head">UPDATES</div>
+              <div id="update-card" class="info-card update-card">
+                <div class="update-head">
+                  <span id="update-name" class="update-name">Loading…</span>
+                  <span id="update-date" class="update-date"></span>
+                </div>
+                <div id="update-body" class="update-body"></div>
               </div>
-              <div class="info-card">
-                <div class="info-title">Zoom &amp; Freelook</div>
-                <div class="info-body">Hold <kbd>C</kbd> to zoom, <kbd>V</kbd> for freelook. Rebind everything in Options → Controls → Daylight.</div>
-              </div>
-              <div class="info-card">
-                <div class="info-title">Invalid session?</div>
-                <div class="info-body">Use the account menu → “Fix login session”, or the “Fix Session” button on the game’s title screen.</div>
+              <div id="update-pager" class="update-pager hidden">
+                <button id="update-newer" title="Newer">‹</button>
+                <span id="update-count" class="pager-info"></span>
+                <button id="update-older" title="Older">›</button>
               </div>
               <div class="side-foot"><span id="app-version-side"></span></div>
             </aside>
@@ -140,7 +140,10 @@
         <section id="tab-packs" class="tab-panel">
           <div class="page-head">
             <h2 class="page-title">Packs</h2>
-            <button id="restore-packs-btn" class="btn btn-small btn-ghost" title="Re-read the pack list from disk — use this if packs are missing after a restart">⟳ Restore packs</button>
+            <div class="page-head-actions">
+              <button id="import-pack-btn" class="btn btn-small" title="Import a Modrinth .mrpack, a Dawn/CurseForge export, or any modpack .zip">↓ Import modpack</button>
+              <button id="restore-packs-btn" class="btn btn-small btn-ghost" title="Re-read the pack list from disk — use this if packs are missing after a restart">⟳ Restore packs</button>
+            </div>
           </div>
           <div id="pack-grid" class="pack-grid"></div>
         </section>

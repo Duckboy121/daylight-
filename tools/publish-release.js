@@ -57,10 +57,20 @@ async function main() {
     console.log(`  deleted duplicate draft ${dup.id}`);
   }
 
+  // electron-builder leaves the body empty; use the release commit's message so
+  // the launcher's Updates panel has something to show.
+  let notes = '';
+  try {
+    notes = require('child_process')
+      .execSync('git log -1 --format=%B', { encoding: 'utf8' })
+      .trim()
+      .replace(/^v\d+\.\d+\.\d+:\s*/, '');
+  } catch { /* notes are a nicety, not worth failing the publish over */ }
+
   const published = await gh(`/releases/${main.id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ draft: false, name: `Daylight ${version}` })
+    body: JSON.stringify({ draft: false, name: `Daylight ${version}`, ...(notes ? { body: notes } : {}) })
   });
   console.log(`published ${published.tag_name} at ${published.html_url}`);
 }

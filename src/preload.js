@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('daylight', {
 
   listPacks: () => invoke('list-packs'),
   restorePacks: () => invoke('restore-packs'),
+  importModpack: () => invoke('import-modpack'),
+  getReleases: () => invoke('get-releases'),
   selectPack: id => invoke('select-pack', id),
   createPack: opts => invoke('create-pack', opts),
   deletePack: id => invoke('delete-pack', id),

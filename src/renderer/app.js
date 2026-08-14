@@ -287,6 +287,67 @@ async function restorePacks(sourceBtn) {
 $('restore-packs-btn').addEventListener('click', e => restorePacks(e.currentTarget));
 $('restore-packs-home').addEventListener('click', e => restorePacks(e.currentTarget));
 
+// Import a Modrinth .mrpack, a Dawn/CurseForge export, or a plain modpack zip.
+$('import-pack-btn').addEventListener('click', async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  $('progress-wrap').classList.remove('hidden');
+  try {
+    const res = await call('importModpack');
+    if (res) {
+      toast(`Imported ${res.name} — Minecraft ${res.version}, ${res.mods} mods`);
+      if (res.note) toast(res.note, true);
+      await refreshPacks();
+      renderPackGrid();
+    }
+  } catch (err) {
+    toast('Import failed: ' + err.message, true);
+  } finally {
+    $('progress-wrap').classList.add('hidden');
+    btn.disabled = false;
+    btn.textContent = '↓ Import modpack';
+  }
+});
+
+// ---------- updates panel ----------
+
+let releases = [];
+let releaseIndex = 0;
+
+function renderRelease() {
+  if (!releases.length) return;
+  const r = releases[releaseIndex];
+  $('update-name').textContent = r.name;
+  $('update-date').textContent = r.date ? new Date(r.date).toLocaleDateString() : '';
+  // release bodies are markdown; show them as readable plain text
+  $('update-body').textContent = r.body
+    ? r.body.replace(/^#+\s*/gm, '').replace(/\*\*/g, '').trim()
+    : 'No notes for this release.';
+  $('update-count').textContent = `${releaseIndex + 1} / ${releases.length}`;
+  $('update-newer').disabled = releaseIndex === 0;
+  $('update-older').disabled = releaseIndex >= releases.length - 1;
+  $('update-pager').classList.toggle('hidden', releases.length < 2);
+}
+
+$('update-newer').addEventListener('click', () => {
+  if (releaseIndex > 0) { releaseIndex--; renderRelease(); }
+});
+$('update-older').addEventListener('click', () => {
+  if (releaseIndex < releases.length - 1) { releaseIndex++; renderRelease(); }
+});
+
+async function loadReleases() {
+  try {
+    releases = await call('getReleases');
+    if (releases.length) renderRelease();
+    else $('update-body').textContent = 'No releases found.';
+  } catch {
+    $('update-name').textContent = 'Updates';
+    $('update-body').textContent = 'Could not load release notes — check your connection.';
+  }
+}
+
 function packCard(p) {
   const card = document.createElement('div');
   card.className = 'pack-card' + (p.selected ? ' selected' : '');
@@ -853,8 +914,9 @@ async function loadVersions(attempt = 0) {
   try { await loadSettings(); } catch { /* settings are non-critical */ }
   await refreshPacksReliable();
 
-  // 2. Version list (network) — optional; failure must not hide packs.
+  // 2. Version list + release notes (network) — optional; failure must not hide packs.
   loadVersions();
+  loadReleases();
 
   // 3. Account (network) — optional.
   try {

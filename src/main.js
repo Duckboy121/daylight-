@@ -784,6 +784,143 @@ async function installMod(projectId, packId) {
   return file.filename;
 }
 
+// ---------- modpack import ----------
+
+// Turns a name into a unique custom pack id.
+function newPackId(name) {
+  const base = 'custom-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  let id = base || 'custom-pack';
+  let n = 2;
+  while (packDef(id)) id = `${base}-${n++}`;
+  return id;
+}
+
+// Some exports wrap everything in a single top-level folder; step into it so
+// the mods/config folders land at the pack root rather than one level down.
+function unwrapSingleFolder(dir) {
+  const entries = fs.readdirSync(dir);
+  if (entries.length === 1) {
+    const inner = path.join(dir, entries[0]);
+    if (fs.statSync(inner).isDirectory()) return inner;
+  }
+  return dir;
+}
+
+/**
+ * Imports a modpack file into a new pack. Understands:
+ *  - Modrinth `.mrpack` (modrinth.index.json: downloads every listed file and
+ *    copies the overrides folder)
+ *  - CurseForge-style exports (manifest.json — overrides are copied; its mods
+ *    are project ids rather than URLs, so those are reported as not fetchable)
+ *  - any plain `.zip` that contains a mods folder (Dawn and most hand-made
+ *    packs) — the whole tree is copied in as-is
+ */
+async function importModpack(progress) {
+  const { canceled, filePaths } = await require('electron').dialog.showOpenDialog(win, {
+    title: 'Import a modpack',
+    properties: ['openFile'],
+    filters: [{ name: 'Modpacks', extensions: ['mrpack', 'zip'] }]
+  });
+  if (canceled) return null;
+
+  const src = filePaths[0];
+  const tmp = path.join(GAME_ROOT, 'import-' + Date.now());
+  fs.mkdirSync(tmp, { recursive: true });
+
+  try {
+    progress('Reading pack…', 0, 1);
+    await extractArchive(src, tmp);
+    const root = unwrapSingleFolder(tmp);
+
+    const mrIndex = path.join(root, 'modrinth.index.json');
+    const cfManifest = path.join(root, 'manifest.json');
+
+    let name = path.basename(src).replace(/\.(mrpack|zip)$/i, '');
+    let version = DEFAULT_MC_VERSION;
+    let files = [];
+    let overrides = [];
+    let note = '';
+
+    if (fs.existsSync(mrIndex)) {
+      const idx = JSON.parse(fs.readFileSync(mrIndex, 'utf8'));
+      name = idx.name || name;
+      version = idx.dependencies?.minecraft || version;
+      files = (idx.files || []).filter(f => f.downloads?.length);
+      overrides = ['overrides', 'client-overrides'];
+    } else if (fs.existsSync(cfManifest)) {
+      const man = JSON.parse(fs.readFileSync(cfManifest, 'utf8'));
+      name = man.name || name;
+      version = man.minecraft?.version || version;
+      overrides = [man.overrides || 'overrides'];
+      if (man.files?.length) {
+        note = `${man.files.length} mods are listed by CurseForge project id, not a download URL — add them from the Mods tab.`;
+      }
+    } else {
+      // plain zip: copy the tree in and hope it looks like a game folder
+      overrides = ['.'];
+      if (!fs.existsSync(path.join(root, 'mods'))) {
+        note = 'No mods folder found in that zip — check the pack contents.';
+      }
+    }
+
+    const id = newPackId(name);
+    const dir = packDir(id);
+    fs.mkdirSync(dir, { recursive: true });
+
+    // copy overrides / raw contents
+    for (const o of overrides) {
+      const from = path.resolve(root, o);
+      if (!fs.existsSync(from)) continue;
+      for (const entry of fs.readdirSync(from)) {
+        // never let a pack's own manifest land in the game folder
+        if (['modrinth.index.json', 'manifest.json', 'modlist.html'].includes(entry)) continue;
+        fs.cpSync(path.join(from, entry), path.join(dir, entry), { recursive: true });
+      }
+    }
+
+    // download the Modrinth-listed files
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      progress(`Downloading ${path.basename(f.path)} (${i + 1}/${files.length})`, i, files.length);
+      const dest = path.join(dir, f.path);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      try {
+        await downloadFile(f.downloads[0], dest);
+      } catch { /* one bad file shouldn't sink the whole import */ }
+    }
+
+    config.packs[id] = { custom: true, name, version };
+    config.selectedPack = id;
+    saveConfig(config);
+
+    return { id, name, version, mods: listMods(id).length, note };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// ---------- release notes ----------
+
+let releasesCache = null;
+let releasesCacheAt = 0;
+const RELEASES_TTL = 10 * 60 * 1000; // a tray session can outlive a release
+
+// The launcher's own changelog, straight from the published releases.
+async function getReleases() {
+  if (releasesCache && Date.now() - releasesCacheAt < RELEASES_TTL) return releasesCache;
+  const data = await fetchJson('https://api.github.com/repos/Duckboy121/daylight-/releases?per_page=25');
+  releasesCache = data
+    .filter(r => !r.draft)
+    .map(r => ({
+      tag: r.tag_name,
+      name: r.name || r.tag_name,
+      date: r.published_at,
+      body: (r.body || '').trim()
+    }));
+  releasesCacheAt = Date.now();
+  return releasesCache;
+}
+
 // Copy user-picked .jar files into a pack's mods folder.
 async function importMods(packId) {
   const pack = packDef(packId || config.selectedPack);
@@ -946,6 +1083,13 @@ handle('create-pack', ({ name, version }) => {
   saveConfig(config);
   return id;
 });
+handle('import-modpack', () => {
+  const send = (ch, data) => win && !win.isDestroyed() && win.webContents.send(ch, data);
+  return importModpack((label, current, total) =>
+    send('launch-progress', { label, current, total })
+  );
+});
+handle('get-releases', () => getReleases());
 handle('delete-pack', id => {
   if (!config.packs[id]?.custom) throw new Error('Built-in packs cannot be deleted');
   delete config.packs[id];
