@@ -63,9 +63,20 @@ function modBuildFor(version) {
   return fs.existsSync(path.join(BUNDLED_DIR, jar)) ? jar : null;
 }
 
-// Client-side performance mods (Modrinth slugs) — Sodium & friends are where
-// the real FPS gains come from. Versions without a build are skipped.
-const PERF_MODS = ['fabric-api', 'sodium', 'lithium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'krypton', 'badoptimizations'];
+// Mod loaders a pack can run on. Fabric is the default and the only one the
+// bundled Daylight mod is built for; Forge/NeoForge packs launch and manage
+// mods normally, they just don't get the in-game module GUI.
+const LOADERS = ['fabric', 'forge', 'neoforge'];
+const LOADER_LABEL = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge' };
+
+// Client-side performance mods (Modrinth slugs) per loader — Sodium & friends
+// are where the real FPS gains come from. Anything with no build for the
+// pack's version is skipped rather than failing the launch.
+const PERF_MODS = {
+  fabric: ['fabric-api', 'sodium', 'lithium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'krypton', 'badoptimizations'],
+  forge: ['embeddium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'modernfix'],
+  neoforge: ['sodium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'modernfix']
+};
 
 // Tuned G1GC flags for smoother frametimes than JVM defaults.
 const JVM_FLAGS = [
@@ -557,24 +568,221 @@ async function ensureFabricProfile(mcVersion) {
   return id;
 }
 
+// ---------- forge / neoforge ----------
+//
+// Forge and NeoForge can't be described by a downloadable profile JSON the way
+// Fabric can: their client install binary-patches the vanilla jar and unpacks a
+// tree of libraries. The official installers do exactly that in headless mode
+// (`--installClient <dir>`), and leave behind a versions/<id>/<id>.json that
+// MCLC can then launch through `version.custom`, identically to Fabric.
+//
+// We deliberately do NOT use MCLC's own `forge:` option: it drives the legacy
+// ForgeWrapper path, which only recognises net.minecraftforge coordinates and
+// so cannot install NeoForge at all.
+
+const FORGE_PROMOS = 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json';
+const FORGE_MAVEN = 'https://maven.minecraftforge.net/net/minecraftforge/forge';
+const NEOFORGE_MAVEN = 'https://maven.neoforged.net/releases/net/neoforged/neoforge';
+const LOADERS_INDEX = path.join(GAME_ROOT, 'loaders.json');
+
+function readLoadersIndex() {
+  try {
+    return JSON.parse(fs.readFileSync(LOADERS_INDEX, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeLoadersIndex(index) {
+  try {
+    fs.writeFileSync(LOADERS_INDEX, JSON.stringify(index, null, 2));
+  } catch { /* index is a cache; a failed write only costs a re-install */ }
+}
+
+// Newest Forge build for a game version. Forge publishes a "recommended" and a
+// "latest" per version; recommended is the safer default when it exists.
+async function resolveForgeVersion(mcVersion) {
+  const promos = await fetchJson(FORGE_PROMOS);
+  const v = promos?.promos?.[`${mcVersion}-recommended`] || promos?.promos?.[`${mcVersion}-latest`];
+  if (!v) throw new Error(`Forge has no build for Minecraft ${mcVersion}`);
+  return v;
+}
+
+// NeoForge versions encode the game version: MC 1.21.1 -> 21.1.x, MC 1.21 -> 21.0.x.
+async function resolveNeoForgeVersion(mcVersion) {
+  const parts = mcVersion.split('.');
+  if (parts[0] !== '1' || parts.length < 2) throw new Error(`NeoForge has no build for Minecraft ${mcVersion}`);
+  const prefix = `${parts[1]}.${parts[2] || '0'}.`;
+
+  const res = await fetch(`${NEOFORGE_MAVEN}/maven-metadata.xml`);
+  if (!res.ok) throw new Error(`NeoForge version list unavailable (HTTP ${res.status})`);
+  const xml = await res.text();
+  const all = [...xml.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
+
+  const stable = all.filter(v => v.startsWith(prefix) && !v.includes('beta'));
+  const usable = stable.length ? stable : all.filter(v => v.startsWith(prefix));
+  if (!usable.length) throw new Error(`NeoForge has no build for Minecraft ${mcVersion}`);
+
+  // Maven metadata is oldest-first, but sort by build number so we don't rely on it.
+  usable.sort((a, b) => (parseInt(a.slice(prefix.length), 10) || 0) - (parseInt(b.slice(prefix.length), 10) || 0));
+  return usable[usable.length - 1];
+}
+
+// The installers refuse to run against a folder that doesn't look like an
+// official-launcher install, and a missing profiles file is the usual reason.
+function ensureLauncherProfiles() {
+  const p = path.join(GAME_ROOT, 'launcher_profiles.json');
+  if (!fs.existsSync(p)) {
+    fs.mkdirSync(GAME_ROOT, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ profiles: {}, settings: {}, version: 3 }, null, 2));
+  }
+}
+
+function listVersionIds() {
+  const dir = path.join(GAME_ROOT, 'versions');
+  try {
+    return fs.readdirSync(dir).filter(f => fs.existsSync(path.join(dir, f, `${f}.json`)));
+  } catch {
+    return [];
+  }
+}
+
+// javaw has no console and swallows the installer's output; the installer is a
+// headless CLI here, so use the plain java binary next to it.
+function consoleJava(javaPath) {
+  const alt = javaPath.replace(/javaw\.exe$/i, 'java.exe');
+  return fs.existsSync(alt) ? alt : javaPath;
+}
+
+function runInstaller(javaPath, installerPath) {
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    execFile(
+      consoleJava(javaPath),
+      ['-jar', installerPath, '--installClient', GAME_ROOT],
+      { cwd: GAME_ROOT, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) {
+          const tail = String(stderr || stdout || '').trim().split('\n').slice(-6).join('\n');
+          return reject(new Error(`Loader install failed:\n${tail || err.message}`));
+        }
+        resolve(String(stdout || ''));
+      }
+    );
+  });
+}
+
+/**
+ * Installs Forge/NeoForge for a game version if it isn't installed already, and
+ * returns the version id to launch through (e.g. `1.20.1-forge-47.3.0` or
+ * `neoforge-21.1.90`). Fabric packs take the profile-JSON path instead.
+ */
+async function ensureLoaderProfile(pack, javaPath, progress) {
+  if (pack.loader === 'fabric') return ensureFabricProfile(pack.version);
+
+  const label = LOADER_LABEL[pack.loader];
+  const key = `${pack.loader}-${pack.version}`;
+  const index = readLoadersIndex();
+  const known = index[key];
+  if (known && fs.existsSync(path.join(GAME_ROOT, 'versions', known, `${known}.json`))) return known;
+
+  progress(`Finding ${label} for ${pack.version}…`, 0, 1);
+  const isNeo = pack.loader === 'neoforge';
+  const loaderVersion = isNeo
+    ? await resolveNeoForgeVersion(pack.version)
+    : await resolveForgeVersion(pack.version);
+  const installerUrl = isNeo
+    ? `${NEOFORGE_MAVEN}/${loaderVersion}/neoforge-${loaderVersion}-installer.jar`
+    : `${FORGE_MAVEN}/${pack.version}-${loaderVersion}/forge-${pack.version}-${loaderVersion}-installer.jar`;
+
+  const cacheDir = path.join(GAME_ROOT, 'loader-installers');
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const installerPath = path.join(cacheDir, path.basename(installerUrl));
+
+  progress(`Downloading ${label} ${loaderVersion}…`, 0, 1);
+  if (!fs.existsSync(installerPath)) await downloadFile(installerUrl, installerPath);
+
+  progress(`Installing ${label} ${loaderVersion} (this takes a minute)…`, 0, 1);
+  ensureLauncherProfiles();
+  const before = new Set(listVersionIds());
+  try {
+    await runInstaller(javaPath, installerPath);
+  } catch (err) {
+    // A truncated or half-downloaded installer would fail the same way forever.
+    fs.rmSync(installerPath, { force: true });
+    throw err;
+  }
+
+  // The installer also drops the vanilla version folder, so match the loader's
+  // own name rather than taking whatever is new — picking the vanilla id here
+  // would launch an unmodded game that looks like it worked.
+  const added = listVersionIds().filter(id => !before.has(id));
+  const marker = isNeo ? 'neoforge' : 'forge';
+  const expected = isNeo ? `neoforge-${loaderVersion}` : `${pack.version}-forge-${loaderVersion}`;
+  const id = added.find(v => v.toLowerCase().includes(marker))
+    // Re-install over an existing folder adds nothing new: fall back to the name
+    // the installer documents.
+    || (fs.existsSync(path.join(GAME_ROOT, 'versions', expected, `${expected}.json`)) ? expected : null);
+  if (!id) throw new Error(`${label} installed but no version profile appeared — check the launcher log`);
+
+  index[key] = id;
+  writeLoadersIndex(index);
+  return id;
+}
+
+// MCLC builds its own JVM arguments and never reads the ones in a version
+// profile. Fabric needs none, but modern Forge/NeoForge do not boot without
+// them: the module path, the --add-opens/--add-exports set and
+// -DlibraryDirectory all live in arguments.jvm. Read them back out and pass
+// them through customArgs, resolving the placeholders the vanilla launcher
+// would have filled in.
+function loaderJvmArgs(versionId, mcVersion) {
+  const jsonPath = path.join(GAME_ROOT, 'versions', versionId, `${versionId}.json`);
+  let profile;
+  try {
+    profile = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  } catch {
+    return [];
+  }
+  const jvm = profile.arguments && profile.arguments.jvm;
+  if (!Array.isArray(jvm)) return [];
+  const libDir = path.resolve(path.join(GAME_ROOT, 'libraries'));
+  return jvm
+    // Rule-gated entries are the OS-specific vanilla ones; MCLC already covers those.
+    .filter(arg => typeof arg === 'string')
+    .map(arg => arg
+      .split('${library_directory}').join(libDir)
+      .split('${classpath_separator}').join(path.delimiter)
+      .split('${version_name}').join(mcVersion));
+}
+
 // ---------- packs ----------
 
 function packDef(id) {
   const builtin = BUILTIN_PACKS[id];
   const state = config.packs[id] || {};
   if (!builtin && !state.custom) return null;
+  const version = builtin?.pinnedVersion || state.version || DEFAULT_MC_VERSION;
+  // Built-in packs are always Fabric — that's what the bundled mod is built for.
+  const loader = builtin ? 'fabric' : (LOADERS.includes(state.loader) ? state.loader : 'fabric');
+  const fabric = loader === 'fabric';
   return {
     id,
     name: builtin ? builtin.name : state.name,
-    desc: builtin ? builtin.desc : 'Custom pack · Daylight + FPS mods included',
-    version: builtin?.pinnedVersion || state.version || DEFAULT_MC_VERSION,
+    desc: builtin
+      ? builtin.desc
+      : (fabric ? 'Custom pack · Daylight + FPS mods included' : `Custom ${LOADER_LABEL[loader]} pack · FPS mods included`),
+    version,
+    loader,
+    loaderLabel: LOADER_LABEL[loader],
     pinned: !!builtin?.pinnedVersion,
-    modrinth: PERF_MODS,
-    bundled: true,
+    modrinth: PERF_MODS[loader],
+    // The Daylight mod is Fabric-only, so only Fabric packs get the bundled jar.
+    bundled: fabric,
     builtin: !!builtin,
     // Whether a Daylight mod build exists for this pack's MC version — the UI
     // says so up front instead of the mod quietly not being there.
-    hasMod: !!modBuildFor(builtin?.pinnedVersion || state.version || DEFAULT_MC_VERSION)
+    hasMod: fabric && !!modBuildFor(version)
   };
 }
 
@@ -630,9 +838,9 @@ function saveManifest(packId, manifest) {
   fs.writeFileSync(path.join(packDir(packId), 'installed.json'), JSON.stringify(manifest, null, 2));
 }
 
-async function resolveModrinthFile(slug, mcVersion) {
+async function resolveModrinthFile(slug, mcVersion, loader = 'fabric') {
   const versions = await fetchJson(
-    `${MODRINTH_API}/project/${slug}/version?game_versions=${encodeURIComponent(JSON.stringify([mcVersion]))}&loaders=${encodeURIComponent(JSON.stringify(['fabric']))}`
+    `${MODRINTH_API}/project/${slug}/version?game_versions=${encodeURIComponent(JSON.stringify([mcVersion]))}&loaders=${encodeURIComponent(JSON.stringify([loader]))}`
   );
   if (!versions.length) return null;
   return versions[0].files.find(f => f.primary) || versions[0].files[0];
@@ -673,7 +881,7 @@ async function ensurePackReady(pack, progress) {
     const existing = manifest.files[slug];
     if (existing && fs.existsSync(path.join(modsDir, existing))) continue;
     progress(`Installing ${slug} (${i + 1}/${slugs.length})`, i, slugs.length);
-    const file = await resolveModrinthFile(slug, pack.version);
+    const file = await resolveModrinthFile(slug, pack.version, pack.loader);
     if (!file) continue; // mod not available for this version yet — skip
     await downloadFile(file.url, path.join(modsDir, file.filename));
     manifest.files[slug] = file.filename;
@@ -706,7 +914,7 @@ async function searchMods(query, packId) {
   const pack = packDef(packId || config.selectedPack);
   const facets = JSON.stringify([
     ['project_type:mod'],
-    ['categories:fabric'],
+    [`categories:${pack.loader}`],
     [`versions:${pack.version}`]
   ]);
   // Fetch a wide batch; the renderer paginates it 20 at a time.
@@ -775,8 +983,8 @@ function listResourcePacks(packId) {
 
 async function installMod(projectId, packId) {
   const pack = packDef(packId || config.selectedPack);
-  const file = await resolveModrinthFile(projectId, pack.version);
-  if (!file) throw new Error('No Fabric build of this mod for ' + pack.version);
+  const file = await resolveModrinthFile(projectId, pack.version, pack.loader);
+  if (!file) throw new Error(`No ${pack.loaderLabel} build of this mod for ${pack.version}`);
   const modsDir = packModsDir(pack.id);
   fs.mkdirSync(modsDir, { recursive: true });
   await downloadFile(file.url, path.join(modsDir, file.filename));
@@ -851,6 +1059,7 @@ async function importModpack(progress) {
 
     let name = path.basename(src).replace(/\.(mrpack|zip)$/i, '');
     let version = DEFAULT_MC_VERSION;
+    let loader = 'fabric';
     let files = [];
     let overrides = [];
     let note = '';
@@ -859,12 +1068,19 @@ async function importModpack(progress) {
       const idx = JSON.parse(fs.readFileSync(mrIndex, 'utf8'));
       name = idx.name || name;
       version = idx.dependencies?.minecraft || version;
+      // The index names its loader as a dependency key.
+      if (idx.dependencies?.neoforge) loader = 'neoforge';
+      else if (idx.dependencies?.forge) loader = 'forge';
       files = (idx.files || []).filter(f => f.downloads?.length);
       overrides = ['overrides', 'client-overrides'];
     } else if (fs.existsSync(cfManifest)) {
       const man = JSON.parse(fs.readFileSync(cfManifest, 'utf8'));
       name = man.name || name;
       version = man.minecraft?.version || version;
+      // e.g. "neoforge-21.1.90", "forge-47.3.0", "fabric-0.16.5"
+      const modLoader = man.minecraft?.modLoaders?.[0]?.id || '';
+      if (modLoader.startsWith('neoforge')) loader = 'neoforge';
+      else if (modLoader.startsWith('forge')) loader = 'forge';
       overrides = [man.overrides || 'overrides'];
       if (man.files?.length) {
         note = `${man.files.length} mods are listed by CurseForge project id, not a download URL — add them from the Mods tab.`;
@@ -903,11 +1119,11 @@ async function importModpack(progress) {
       } catch { /* one bad file shouldn't sink the whole import */ }
     }
 
-    config.packs[id] = { custom: true, name, version };
+    config.packs[id] = { custom: true, name, version, loader };
     config.selectedPack = id;
     saveConfig(config);
 
-    return { id, name, version, mods: listMods(id).length, note };
+    return { id, name, version, loader: LOADER_LABEL[loader], mods: listMods(id).length, note };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -986,7 +1202,15 @@ async function launchGame() {
     send('launch-progress', { label, current, total })
   );
 
-  const fabricId = await ensureFabricProfile(pack.version);
+  const javaPath = await ensureJava(pack.version, (label, current, total) =>
+    send('launch-progress', { label, current, total })
+  );
+
+  // Fabric resolves to a downloadable profile JSON; Forge/NeoForge have to run
+  // their official installer once, which needs the JVM resolved above.
+  const versionId = await ensureLoaderProfile(pack, javaPath, (label, current, total) =>
+    send('launch-progress', { label, current, total })
+  );
 
   const launcher = new Client();
   // Watch the stream for stale-session symptoms and tell the renderer once,
@@ -1009,10 +1233,6 @@ async function launchGame() {
     send('launch-progress', { label: `Downloading ${e.type}: ${e.name}`, current: e.current, total: e.total })
   );
 
-  const javaPath = await ensureJava(pack.version, (label, current, total) =>
-    send('launch-progress', { label, current, total })
-  );
-
   // Hand the in-game mod the loopback bridge coordinates so its "Fix session"
   // button can reach the launcher (see startSessionBridge). Only when the
   // bridge actually came up.
@@ -1023,9 +1243,9 @@ async function launchGame() {
   const proc = await launcher.launch({
     root: GAME_ROOT,
     authorization: minecraftToken.mclc(),
-    version: { number: pack.version, type: 'release', custom: fabricId },
+    version: { number: pack.version, type: 'release', custom: versionId },
     memory: { min: `${config.minRam}G`, max: `${config.maxRam}G` },
-    customArgs: [...JVM_FLAGS, ...bridgeArgs],
+    customArgs: [...JVM_FLAGS, ...bridgeArgs, ...loaderJvmArgs(versionId, pack.version)],
     overrides: { gameDirectory: packDir(pack.id) },
     ...(javaPath ? { javaPath } : {})
   });
@@ -1089,10 +1309,10 @@ handle('select-pack', id => {
   config.selectedPack = id;
   saveConfig(config);
 });
-handle('create-pack', ({ name, version }) => {
+handle('create-pack', ({ name, version, loader }) => {
   const id = 'custom-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!id || packDef(id)) throw new Error('A pack with that name already exists');
-  config.packs[id] = { custom: true, name, version };
+  config.packs[id] = { custom: true, name, version, loader: LOADERS.includes(loader) ? loader : 'fabric' };
   config.selectedPack = id;
   saveConfig(config);
   return id;
@@ -1110,6 +1330,15 @@ handle('delete-pack', id => {
   if (config.selectedPack === id) config.selectedPack = 'daylight';
   saveConfig(config);
   fs.rmSync(packDir(id), { recursive: true, force: true });
+});
+handle('get-loaders', () => LOADERS.map(id => ({ id, label: LOADER_LABEL[id] })));
+handle('set-pack-loader', ({ id, loader }) => {
+  const def = packDef(id);
+  if (!def) throw new Error('Unknown pack');
+  if (def.builtin) throw new Error('Built-in packs always run on Fabric');
+  if (!LOADERS.includes(loader)) throw new Error('Unknown mod loader');
+  config.packs[id] = { ...config.packs[id], loader };
+  saveConfig(config);
 });
 handle('set-pack-version', ({ id, version }) => {
   const def = packDef(id);

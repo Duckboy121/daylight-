@@ -5,6 +5,9 @@ let launching = false;
 let gameRunning = false;
 let packs = [];
 let versions = [];
+// Mod loaders a pack can run on; comes from the main process so the list
+// can't drift from what the launcher actually knows how to install.
+let loaders = [{ id: 'fabric', label: 'Fabric' }];
 let modsPackId = null; // which pack the Mods tab installs into
 
 // ---------- helpers ----------
@@ -375,14 +378,16 @@ function packCard(p) {
   if (!p.hasMod) {
     const warn = document.createElement('div');
     warn.className = 'pack-nomod';
-    warn.textContent = `No Daylight mod for ${p.version} — performance mods only`;
+    warn.textContent = p.loader === 'fabric'
+      ? `No Daylight mod for ${p.version} — performance mods only`
+      : `The Daylight mod is Fabric-only — this ${p.loaderLabel} pack gets performance mods only`;
     desc.append(warn);
   }
 
   const meta = document.createElement('div');
   meta.className = 'pack-meta';
   if (p.pinned) {
-    meta.textContent = `Minecraft ${p.version} · ${p.modCount} mods`;
+    meta.textContent = `Minecraft ${p.version} · ${p.loaderLabel} · ${p.modCount} mods`;
   } else {
     const label = document.createElement('span');
     label.textContent = 'MC';
@@ -407,6 +412,31 @@ function packCard(p) {
     const count = document.createElement('span');
     count.textContent = `· ${p.modCount} mods`;
     meta.append(label, verSel, count);
+
+    // Loader picker. Built-in packs are Fabric-only (that's what the bundled
+    // Daylight mod is built for), so they just show the label above.
+    const loaderSel = document.createElement('select');
+    for (const l of loaders) {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.textContent = l.label;
+      loaderSel.append(opt);
+    }
+    loaderSel.value = p.loader;
+    // The bundled Daylight mod is a Fabric build, so built-in packs can't move.
+    loaderSel.disabled = p.builtin;
+    if (p.builtin) loaderSel.title = 'Built-in packs always run on Fabric';
+    loaderSel.addEventListener('click', e => e.stopPropagation());
+    loaderSel.addEventListener('change', async e => {
+      try {
+        await call('setPackLoader', { id: p.id, loader: e.target.value });
+        await refreshPacks();
+        renderPackGrid();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+    meta.append(loaderSel);
   }
 
   card.append(head, desc, meta);
@@ -458,6 +488,25 @@ function renderPackGrid() {
       verSel.append(opt);
     }
     if (versions.includes('1.21.11')) verSel.value = '1.21.11';
+
+    const loaderSel = $('new-pack-loader');
+    loaderSel.innerHTML = '';
+    for (const l of loaders) {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.textContent = l.label;
+      loaderSel.append(opt);
+    }
+    loaderSel.value = 'fabric';
+    const note = $('new-pack-note');
+    const updateNote = () => {
+      note.textContent = loaderSel.value === 'fabric'
+        ? 'Includes the Daylight mod and the performance mod set.'
+        : `${loaderSel.selectedOptions[0].textContent} packs get the performance mods — the Daylight mod is Fabric-only.`;
+    };
+    loaderSel.onchange = updateNote;
+    updateNote();
+
     $('new-pack-name').value = '';
     $('pack-dialog').showModal();
   });
@@ -469,7 +518,11 @@ $('pack-create-ok').addEventListener('click', async () => {
   const name = $('new-pack-name').value.trim();
   if (!name) return toast('Give the pack a name', true);
   try {
-    await call('createPack', { name, version: $('new-pack-version').value });
+    await call('createPack', {
+      name,
+      version: $('new-pack-version').value,
+      loader: $('new-pack-loader').value
+    });
     $('pack-dialog').close();
     await refreshPacks();
     renderPackGrid();
@@ -891,6 +944,10 @@ window.daylight.onUpdateError(msg => {
 // cold boot (network not up yet) never blocks anything.
 async function loadVersions(attempt = 0) {
   try {
+    try {
+      const known = await call('getLoaders');
+      if (known?.length) loaders = known;
+    } catch { /* keep the Fabric-only fallback */ }
     versions = await call('getVersions');
     if (versions.length) {
       if (document.getElementById('tab-packs').classList.contains('active')) renderPackGrid();
