@@ -246,8 +246,12 @@ function requiredJavaFor(mcVersion) {
 // carries its major version (jdk-21, temurin-17-jre, zulu21.*, etc.).
 function javaSearchRoots() {
   const home = require('os').homedir();
+  // JetBrains IDEs and Toolbox install JDKs here on every platform, and it is
+  // often the only place a developer machine has the older JDK a given
+  // Minecraft version needs.
+  const jetbrains = path.join(home, '.jdks');
   if (IS_WIN) {
-    return ['C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java',
+    return [jetbrains, 'C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java',
       'C:\\Program Files\\Microsoft', 'C:\\Program Files\\Zulu'];
   }
   if (process.platform === 'darwin') {
@@ -269,7 +273,16 @@ function javaBinIn(dir) {
 
 // Newest system JDK that satisfies the requirement. Old MC (Java 8 era)
 // breaks on modern JVMs, so for those only an exact major counts.
-function findSystemJava(need) {
+// Minecraft bundles its own LWJGL, and LWJGL 3.3.3 and older abort with
+// "Unsupported JNI version detected" on Java 24+ and then die in native code
+// during render init (exit 0xC0000005). Every 1.x release ships such an LWJGL,
+// so they must stay below that line; the year-based versions carry a newer
+// LWJGL and want Java 25. A newer JDK is emphatically not always better.
+function maxJavaFor(mcVersion) {
+  return Number(mcVersion.split('.')[0]) >= 26 ? 99 : 23;
+}
+
+function findSystemJava(need, max) {
   let best = null;
   let bestVer = 0;
   for (const root of javaSearchRoots()) {
@@ -278,10 +291,12 @@ function findSystemJava(need) {
       const m = dir.match(/jdk-?(\d+)|jre-?(\d+)|[a-z]+[-_]?(\d+)/i);
       if (!m) continue;
       const ver = Number(m[1] || m[2] || m[3]);
-      const ok = need >= 17 ? ver >= need : ver === need;
+      const ok = need >= 17 ? (ver >= need && ver <= max) : ver === need;
       if (!ok) continue;
       const exe = javaBinIn(path.join(root, dir));
-      if (ver > bestVer && fs.existsSync(exe)) {
+      // Prefer the version closest to what this Minecraft actually asks for,
+      // so an exact match always beats a merely-allowed newer one.
+      if (fs.existsSync(exe) && (best === null || (ver - need) < (bestVer - need))) {
         bestVer = ver;
         best = exe;
       }
@@ -326,7 +341,7 @@ function extractArchive(archive, dest) {
 async function ensureJava(mcVersion, progress) {
   if (config.javaPath) return config.javaPath;
   const need = requiredJavaFor(mcVersion);
-  const found = findSystemJava(need) || findManagedJava(need);
+  const found = findSystemJava(need, maxJavaFor(mcVersion)) || findManagedJava(need);
   if (found) return found;
 
   progress(`Downloading Java ${need}`, 0, 1);
