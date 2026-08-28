@@ -162,7 +162,8 @@ $('acct-add').addEventListener('click', async () => {
     renderAccountMenu();
     toast(`Signed in as ${profile.name}`);
   } catch (err) {
-    toast('Login failed: ' + err.message, true);
+    // Closing the Microsoft window is a decision, not a failure.
+    if (!/closed by user/i.test(err.message)) toast('Login failed: ' + err.message, true);
   } finally {
     $('acct-add').textContent = '+ Add account';
   }

@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { Client } = require('minecraft-launcher-core');
-const { Auth } = require('msmc');
+const { Auth, lexicon } = require('msmc');
 const { autoUpdater } = require('electron-updater');
 
 // Canonicalize the game root to its real on-disk path. Under a Windows
@@ -1278,12 +1278,36 @@ async function launchGame() {
 
 // ---------- IPC ----------
 
+// msmc reports a failure as a bare lexicon code, or as {response, ts} -- never
+// as an Error. So the obvious `err.message || String(err)` turns every single
+// auth failure into "[object Object]" and throws away the one thing the person
+// staring at the toast actually needs: which step failed and why.
+function describeError(err) {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string') return lexicon.getCode(err);
+  if (err && typeof err === 'object') {
+    if (typeof err.ts === 'string') {
+      const status = err.response && err.response.status;
+      return lexicon.getCode(err.ts) + (status ? ` (HTTP ${status})` : '');
+    }
+    if (typeof err.message === 'string') return err.message;
+    try {
+      return JSON.stringify(err);
+    } catch { /* circular; fall through */ }
+  }
+  return String(err);
+}
+
 function handle(channel, fn) {
   ipcMain.handle(channel, async (_event, ...args) => {
     try {
       return { ok: true, data: await fn(...args) };
     } catch (err) {
-      return { ok: false, error: err.message || String(err) };
+      const message = describeError(err);
+      // Also to disk: the toast is gone in seconds, and "it said login failed"
+      // is not something anyone can act on when they report it.
+      writeStartupLog(`error ${channel}: ${message}`);
+      return { ok: false, error: message };
     }
   });
 }
