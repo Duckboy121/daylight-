@@ -123,10 +123,22 @@ const defaultConfig = {
   maxRam: RAM.max,
   javaPath: '',
   azureClientId: '',
-  daylightMod: true,    // the mod is opt-out, not compulsory
   accounts: [],         // [{ uuid, name, refreshToken }]
   activeUuid: ''
 };
+
+/**
+ * 2.19.0 had a single switch for every pack; 2.19.1 moved it onto each one.
+ * Carry a user's "off" across rather than silently switching the mod back on.
+ */
+function migrateModSwitch(cfg) {
+  if (cfg.daylightMod !== false) { delete cfg.daylightMod; return cfg; }
+  for (const id of Object.keys(cfg.packs || {})) {
+    if (cfg.packs[id].daylightMod === undefined) cfg.packs[id].daylightMod = false;
+  }
+  delete cfg.daylightMod;
+  return cfg;
+}
 
 function readConfigFile(p) {
   const raw = fs.readFileSync(p, 'utf8');
@@ -177,6 +189,8 @@ function loadConfig() {
     delete cfg.refreshToken;
     removedLegacy = true;
   }
+
+  migrateModSwitch(cfg);
 
   const recovered = recoverOrphanPacks(cfg);
 
@@ -793,10 +807,11 @@ function packDef(id) {
     loaderLabel: LOADER_LABEL[loader],
     pinned: !!builtin?.pinnedVersion,
     modrinth: PERF_MODS[loader],
-    // Fabric-only, and only if the user still wants it. Turning it off is a
-    // real removal: the launch path below deletes the jar rather than leaving
-    // a disabled copy behind, so the pack runs genuinely without it.
-    bundled: fabric && config.daylightMod !== false,
+    // Fabric-only, and only if this pack still wants it. Kept per pack rather
+    // than globally so one pack can run Daylight while another runs clean --
+    // useful when a server does not allow client mods.
+    bundled: fabric && state.daylightMod !== false,
+    daylightMod: state.daylightMod !== false,
     builtin: !!builtin,
     // Whether a Daylight mod build exists for this pack's MC version — the UI
     // says so up front instead of the mod quietly not being there.
@@ -1382,6 +1397,12 @@ handle('set-pack-loader', ({ id, loader }) => {
   if (def.builtin) throw new Error('Built-in packs always run on Fabric');
   if (!LOADERS.includes(loader)) throw new Error('Unknown mod loader');
   config.packs[id] = { ...config.packs[id], loader };
+  saveConfig(config);
+});
+handle('set-pack-mod', ({ id, enabled }) => {
+  const def = packDef(id);
+  if (!def) throw new Error('Unknown pack');
+  config.packs[id] = { ...config.packs[id], daylightMod: !!enabled };
   saveConfig(config);
 });
 handle('set-pack-version', ({ id, version }) => {

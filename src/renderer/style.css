@@ -446,10 +446,11 @@ select { cursor: pointer; }
 .setting label small { color: var(--dim); font-weight: 400; }
 .setting input { max-width: 480px; }
 .setting-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-/* a checkbox row reads as one line, so the label sits beside the box rather
-   than stacked above it like the text fields */
-.setting-check label { display: flex; align-items: center; gap: 9px; cursor: pointer; }
-.setting-check input { width: 16px; height: 16px; max-width: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+/* the per-pack Daylight switch, sitting with the version and loader pickers */
+.pack-mod { display: flex; align-items: center; gap: 7px; cursor: pointer;
+  font-size: 12px; color: var(--dim); margin-top: 8px; }
+.pack-mod input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.pack-mod:hover { color: var(--text); }
 .saved-note { color: var(--accent); font-size: 13px; }
 .update-setting { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
 .update-row { display: flex; align-items: center; gap: 12px; }

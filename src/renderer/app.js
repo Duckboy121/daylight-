@@ -440,7 +440,31 @@ function packCard(p) {
     meta.append(loaderSel);
   }
 
-  card.append(head, desc, meta);
+  // Per-pack Daylight switch. Only where it could actually apply: a Forge pack
+  // or a version with no build has nothing to turn off, and the card already
+  // says so above.
+  if (p.loader === 'fabric' && p.hasMod) {
+    const row = document.createElement('label');
+    row.className = 'pack-mod';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = p.daylightMod !== false;
+    row.append(box, document.createTextNode('Daylight mod'));
+    row.addEventListener('click', e => e.stopPropagation());
+    box.addEventListener('change', async e => {
+      try {
+        await call('setPackMod', { id: p.id, enabled: e.target.checked });
+        await refreshPacks();
+        renderPackGrid();
+      } catch (err) {
+        toast(err.message, true);
+        e.target.checked = !e.target.checked;
+      }
+    });
+    card.append(head, desc, meta, row);
+  } else {
+    card.append(head, desc, meta);
+  }
 
   if (!p.builtin) {
     const actions = document.createElement('div');
@@ -884,7 +908,6 @@ async function loadSettings() {
   $('max-ram').value = cfg.maxRam;
   $('java-path').value = cfg.javaPath;
   $('azure-id').value = cfg.azureClientId;
-  $('daylight-mod').checked = cfg.daylightMod !== false;
   const version = await call('getAppVersion');
   $('app-version').textContent = `(v${version})`;
   const sideVer = $('app-version-side');
@@ -896,8 +919,7 @@ $('save-settings').addEventListener('click', async () => {
     minRam: Math.max(1, parseInt($('min-ram').value) || 2),
     maxRam: Math.max(1, parseInt($('max-ram').value) || 4),
     javaPath: $('java-path').value.trim(),
-    azureClientId: $('azure-id').value.trim(),
-    daylightMod: $('daylight-mod').checked
+    azureClientId: $('azure-id').value.trim()
   });
   const note = $('settings-saved');
   note.classList.remove('hidden');
