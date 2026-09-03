@@ -446,6 +446,10 @@ select { cursor: pointer; }
 .setting label small { color: var(--dim); font-weight: 400; }
 .setting input { max-width: 480px; }
 .setting-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+/* a checkbox row reads as one line, so the label sits beside the box rather
+   than stacked above it like the text fields */
+.setting-check label { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.setting-check input { width: 16px; height: 16px; max-width: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .saved-note { color: var(--accent); font-size: 13px; }
 .update-setting { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
 .update-row { display: flex; align-items: center; gap: 12px; }

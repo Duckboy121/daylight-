@@ -884,6 +884,7 @@ async function loadSettings() {
   $('max-ram').value = cfg.maxRam;
   $('java-path').value = cfg.javaPath;
   $('azure-id').value = cfg.azureClientId;
+  $('daylight-mod').checked = cfg.daylightMod !== false;
   const version = await call('getAppVersion');
   $('app-version').textContent = `(v${version})`;
   const sideVer = $('app-version-side');
@@ -895,7 +896,8 @@ $('save-settings').addEventListener('click', async () => {
     minRam: Math.max(1, parseInt($('min-ram').value) || 2),
     maxRam: Math.max(1, parseInt($('max-ram').value) || 4),
     javaPath: $('java-path').value.trim(),
-    azureClientId: $('azure-id').value.trim()
+    azureClientId: $('azure-id').value.trim(),
+    daylightMod: $('daylight-mod').checked
   });
   const note = $('settings-saved');
   note.classList.remove('hidden');

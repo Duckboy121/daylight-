@@ -123,6 +123,7 @@ const defaultConfig = {
   maxRam: RAM.max,
   javaPath: '',
   azureClientId: '',
+  daylightMod: true,    // the mod is opt-out, not compulsory
   accounts: [],         // [{ uuid, name, refreshToken }]
   activeUuid: ''
 };
@@ -792,8 +793,10 @@ function packDef(id) {
     loaderLabel: LOADER_LABEL[loader],
     pinned: !!builtin?.pinnedVersion,
     modrinth: PERF_MODS[loader],
-    // The Daylight mod is Fabric-only, so only Fabric packs get the bundled jar.
-    bundled: fabric,
+    // Fabric-only, and only if the user still wants it. Turning it off is a
+    // real removal: the launch path below deletes the jar rather than leaving
+    // a disabled copy behind, so the pack runs genuinely without it.
+    bundled: fabric && config.daylightMod !== false,
     builtin: !!builtin,
     // Whether a Daylight mod build exists for this pack's MC version — the UI
     // says so up front instead of the mod quietly not being there.
@@ -904,8 +907,10 @@ async function ensurePackReady(pack, progress) {
 
   // Bundled Daylight mod jar — pick the build compiled for this pack's MC
   // version; if there is none, make sure the jar is absent so Fabric doesn't
-  // refuse to launch over an unsatisfiable dependency. The mod is built-in:
-  // it is always (re)copied so a user can't end up without it.
+  // refuse to launch over an unsatisfiable dependency. While it is switched on
+  // it is always (re)copied, so a stale build can't linger; switched off, the
+  // jar is deleted rather than merely skipped, so turning it back on is the
+  // only way it returns.
   const dest = path.join(modsDir, DAYLIGHT_JAR);
   const buildJar = modBuildFor(pack.version);
   if (pack.bundled && buildJar) {
