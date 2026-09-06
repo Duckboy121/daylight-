@@ -523,19 +523,60 @@ async function fixSession() {
 let bridgePort = 0;
 const bridgeSecret = crypto.randomBytes(24).toString('hex');
 
+/** The base64 body of a PEM block, which for these keys is the DER itself. */
+function pemBody(pem) {
+  return String(pem).replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+}
+
+/**
+ * Fetches this account's Mojang-signed keypair.
+ *
+ * The game normally hands this to the mod itself, but only when its own user
+ * API service came up online. When that quietly falls back to offline there is
+ * no key, no proof of identity, and cosmetics cannot be saved -- while every
+ * other symptom looks like a network fault. The launcher holds a token it has
+ * just refreshed and has no such fallback, so it asks Mojang directly and
+ * passes the answer through.
+ */
+async function fetchCertificate() {
+  if (!config.activeUuid) throw new Error('No account is signed in');
+  await switchAccount(config.activeUuid);          // refresh + persist
+  const t = minecraftToken.mclc();
+  const res = await fetch('https://api.minecraftservices.com/player/certificates', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${t.access_token}` }
+  });
+  if (!res.ok) throw new Error(`Mojang refused the certificate (HTTP ${res.status})`);
+  const cert = await res.json();
+  if (!cert.keyPair || !cert.publicKeySignatureV2) {
+    throw new Error('Mojang returned no usable certificate');
+  }
+  return {
+    uuid: t.uuid,
+    expiresAt: Date.parse(cert.expiresAt),
+    // v2 signs uuid || expiresAt || key, which is what the cosmetics service
+    // checks; v1 covers different bytes and would never verify.
+    keySignature: cert.publicKeySignatureV2,
+    publicKey: pemBody(cert.keyPair.publicKey),
+    privateKey: pemBody(cert.keyPair.privateKey)
+  };
+}
+
 function startSessionBridge() {
   const server = http.createServer((req, res) => {
     const reply = (obj) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(obj));
     };
-    if (req.method !== 'POST' || req.url !== '/refresh-session'
+    const known = ['/refresh-session', '/certificate'];
+    if (req.method !== 'POST' || !known.includes(req.url)
         || req.headers['x-daylight-secret'] !== bridgeSecret) {
       res.writeHead(403);
       res.end();
       return;
     }
     (async () => {
+      if (req.url === '/certificate') return fetchCertificate();
       if (!config.activeUuid) throw new Error('No account is signed in');
       await switchAccount(config.activeUuid); // refresh + persist
       const t = minecraftToken.mclc();
