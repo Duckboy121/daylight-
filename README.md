@@ -169,6 +169,8 @@ Adoptium if none is found, or you can set an explicit path in Settings.
 
 Login works out of the box via msmc. To ship this launcher publicly, register
 an Azure app: Azure Portal → Entra ID → App registrations → new app, personal
+
+( ai was only used for the txt like this and the updates page)
 Microsoft accounts, redirect URI `http://localhost` (mobile & desktop
 platform). Then apply for Minecraft API permission at
 **https://aka.ms/mce-reviewappid** (new Azure apps get 403 from
