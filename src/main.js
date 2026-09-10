@@ -902,9 +902,10 @@ function loadManifest(packId) {
     const m = JSON.parse(fs.readFileSync(path.join(packDir(packId), 'installed.json'), 'utf8'));
     m.files = m.files || {};
     m.removed = m.removed || []; // auto-installed mods the user deleted on purpose
+    m.manual = m.manual || {}; // catalog project id -> installed filename
     return m;
   } catch {
-    return { mcVersion: null, files: {}, removed: [] };
+    return { mcVersion: null, files: {}, removed: [], manual: {} };
   }
 }
 
@@ -988,6 +989,8 @@ async function ensurePackReady(pack, progress) {
 
 async function searchMods(query, packId) {
   const pack = packDef(packId || config.selectedPack);
+  const manifest = loadManifest(pack.id);
+  const modsDir = packModsDir(pack.id);
   const facets = JSON.stringify([
     ['project_type:mod'],
     [`categories:${pack.loader}`],
@@ -1002,7 +1005,9 @@ async function searchMods(query, packId) {
     title: h.title,
     description: h.description,
     downloads: h.downloads,
-    icon: h.icon_url
+    icon: h.icon_url,
+    installed: !!(manifest.manual[h.project_id]
+      && fs.existsSync(path.join(modsDir, manifest.manual[h.project_id])))
   }));
 }
 
@@ -1063,11 +1068,14 @@ async function installMod(projectId, packId) {
   if (!file) throw new Error(`No ${pack.loaderLabel} build of this mod for ${pack.version}`);
   const modsDir = packModsDir(pack.id);
   fs.mkdirSync(modsDir, { recursive: true });
-  await downloadFile(file.url, path.join(modsDir, file.filename));
+  const target = path.join(modsDir, file.filename);
+  const alreadyInstalled = fs.existsSync(target);
+  if (!alreadyInstalled) await downloadFile(file.url, target);
 
   // Installing one of the auto-installed mods again clears its "removed" mark,
   // so it resumes being kept up to date on launch.
   const manifest = loadManifest(pack.id);
+  manifest.manual[projectId] = file.filename;
   if (manifest.removed.length) {
     try {
       const { slug } = await fetchJson(`${MODRINTH_API}/project/${projectId}`);
@@ -1079,7 +1087,8 @@ async function installMod(projectId, packId) {
       }
     } catch { /* not one of ours, or offline — nothing to un-mark */ }
   }
-  return file.filename;
+  saveManifest(pack.id, manifest);
+  return { filename: file.filename, alreadyInstalled };
 }
 
 // ---------- modpack import ----------
@@ -1471,11 +1480,13 @@ handle('delete-mod', ({ filename, packId }) => {
   // mod itself is unconditionally restored.
   const manifest = loadManifest(id);
   const slug = Object.keys(manifest.files).find(s => manifest.files[s] === base);
+  const manualId = Object.keys(manifest.manual).find(id => manifest.manual[id] === base);
   if (slug) {
     delete manifest.files[slug];
     if (!manifest.removed.includes(slug)) manifest.removed.push(slug);
-    saveManifest(id, manifest);
   }
+  if (manualId) delete manifest.manual[manualId];
+  if (slug || manualId) saveManifest(id, manifest);
 });
 handle('open-mods-folder', packId => {
   const dir = packModsDir(packId || config.selectedPack);

@@ -1,5 +1,5 @@
-// electron-builder afterAllArtifactBuild hook: copy the finished installer
-// exe to the user's share folder so it's always ready to send to others.
+// electron-builder afterAllArtifactBuild hook: copy every Windows update
+// deliverable to the user's share folder, ready for local testing or sharing.
 const fs = require('fs');
 const path = require('path');
 
@@ -11,13 +11,20 @@ exports.default = function (buildResult) {
   if (process.platform !== 'win32') return [];
   fs.mkdirSync(DEST, { recursive: true });
   const copied = [];
+  const copy = file => {
+    const target = path.join(DEST, path.basename(file));
+    fs.copyFileSync(file, target);
+    copied.push(target);
+  };
   for (const file of buildResult.artifactPaths) {
-    if (file.toLowerCase().endsWith('.exe')) {
-      const target = path.join(DEST, path.basename(file));
-      fs.copyFileSync(file, target);
-      copied.push(target);
+    if (/\.(exe|blockmap)$/i.test(file)) {
+      copy(file);
+      // electron-builder does not always list the update manifest as an
+      // artifact, but it is emitted beside the Windows installer.
+      const manifest = path.join(path.dirname(file), 'latest.yml');
+      if (fs.existsSync(manifest) && !copied.some(p => path.basename(p) === 'latest.yml')) copy(manifest);
     }
   }
-  if (copied.length) console.log('  • copied installer to ' + DEST);
+  if (copied.length) console.log('Copied update files to ' + DEST);
   return copied;
 };

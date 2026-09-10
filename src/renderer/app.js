@@ -647,12 +647,14 @@ function resultCard(hit, onInstall) {
 
   const install = document.createElement('button');
   install.className = 'btn btn-small';
-  install.textContent = 'Install';
+  install.disabled = !!hit.installed;
+  install.textContent = hit.installed ? 'Installed' : 'Install';
   install.addEventListener('click', async () => {
     install.disabled = true;
     install.textContent = '…';
     try {
       await onInstall(hit.id);
+      hit.installed = true;
       install.textContent = 'Installed';
     } catch (err) {
       toast(err.message, true);
@@ -714,6 +716,7 @@ function refreshModsTab() {
   const pack = currentModsPack();
   $('mods-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
   refreshInstalledMods();
+  if (!modSearch.hits.length) searchMods();
 }
 
 $('mods-pack-select').addEventListener('change', e => {
@@ -721,7 +724,9 @@ $('mods-pack-select').addEventListener('change', e => {
   const pack = currentModsPack();
   $('mods-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
   $('mod-results').innerHTML = '';
+  modSearch.hits = [];
   refreshInstalledMods();
+  searchMods();
 });
 
 $('add-mod-btn').addEventListener('click', async () => {
@@ -780,7 +785,6 @@ async function refreshInstalledMods() {
 const modSearch = { hits: [], page: 0 };
 async function searchMods() {
   const query = $('mod-search').value.trim();
-  if (!query) return;
   const list = $('mod-results');
   const pager = $('mod-pager');
   list.innerHTML = '<div class="mod-item"><span class="mod-desc">Searching…</span></div>';
@@ -793,7 +797,8 @@ async function searchMods() {
       return;
     }
     renderResultsPage(modSearch, list, pager, async id => {
-      const file = await call('installMod', id, modsPackId);
+      const result = await call('installMod', id, modsPackId);
+      const file = result.filename;
       toast(`Installed ${file} → ${currentModsPack().name}`);
       refreshInstalledMods();
       refreshPacks();
@@ -833,6 +838,7 @@ function refreshRpTab() {
   const pack = currentRpPack();
   $('rp-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
   refreshInstalledRp();
+  if (!rpSearch.hits.length) searchResourcePacks();
 }
 
 $('rp-pack-select').addEventListener('change', e => {
@@ -841,7 +847,9 @@ $('rp-pack-select').addEventListener('change', e => {
   $('rp-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
   $('rp-results').innerHTML = '';
   $('rp-pager').classList.add('hidden');
+  rpSearch.hits = [];
   refreshInstalledRp();
+  searchResourcePacks();
 });
 
 async function refreshInstalledRp() {
@@ -873,7 +881,6 @@ async function refreshInstalledRp() {
 
 async function searchResourcePacks() {
   const query = $('rp-search').value.trim();
-  if (!query) return;
   const list = $('rp-results');
   const pager = $('rp-pager');
   list.innerHTML = '<div class="mod-item"><span class="mod-desc">Searching…</span></div>';
