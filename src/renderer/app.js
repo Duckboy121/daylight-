@@ -716,7 +716,7 @@ function refreshModsTab() {
   const pack = currentModsPack();
   $('mods-pack-version').textContent = pack ? `Minecraft ${pack.version}` : '';
   refreshInstalledMods();
-  if (!modSearch.hits.length) searchMods();
+  searchMods();
 }
 
 $('mods-pack-select').addEventListener('change', e => {
@@ -776,6 +776,7 @@ async function refreshInstalledMods() {
       await call('deleteMod', mod.file, modsPackId);
       refreshInstalledMods();
       refreshPacks();
+      searchMods();
     });
 
     list.append(modItem([name, del]));
@@ -784,26 +785,31 @@ async function refreshInstalledMods() {
 
 const modSearch = { hits: [], page: 0 };
 async function searchMods() {
+  const request = modSearch.request = (modSearch.request || 0) + 1;
+  const targetPack = modsPackId;
   const query = $('mod-search').value.trim();
   const list = $('mod-results');
   const pager = $('mod-pager');
   list.innerHTML = '<div class="mod-item"><span class="mod-desc">Searching…</span></div>';
   pager.classList.add('hidden');
   try {
-    modSearch.hits = await call('searchMods', query, modsPackId);
+    const hits = await call('searchMods', query, targetPack);
+    if (request !== modSearch.request) return;
+    modSearch.hits = hits;
     modSearch.page = 0;
     if (!modSearch.hits.length) {
       list.innerHTML = '<div class="mod-item"><span class="mod-desc">No results for this version</span></div>';
       return;
     }
     renderResultsPage(modSearch, list, pager, async id => {
-      const result = await call('installMod', id, modsPackId);
+      const result = await call('installMod', id, targetPack);
       const file = result.filename;
       toast(`Installed ${file} → ${currentModsPack().name}`);
       refreshInstalledMods();
       refreshPacks();
     });
   } catch (err) {
+    if (request !== modSearch.request) return;
     list.innerHTML = '';
     toast('Search failed: ' + err.message, true);
   }

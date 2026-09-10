@@ -8,6 +8,7 @@ const { Readable } = require('stream');
 const { Client } = require('minecraft-launcher-core');
 const { Auth, lexicon } = require('msmc');
 const { autoUpdater } = require('electron-updater');
+const { installedProjects, inPack } = require('./mod-catalog');
 
 // Canonicalize the game root to its real on-disk path. Under a Windows
 // AppContainer, %APPDATA% is redirected (e.g. to LocalCache\Roaming); if we
@@ -991,6 +992,7 @@ async function searchMods(query, packId) {
   const pack = packDef(packId || config.selectedPack);
   const manifest = loadManifest(pack.id);
   const modsDir = packModsDir(pack.id);
+  const existing = await installedProjects(modsDir);
   const facets = JSON.stringify([
     ['project_type:mod'],
     [`categories:${pack.loader}`],
@@ -1006,7 +1008,7 @@ async function searchMods(query, packId) {
     description: h.description,
     downloads: h.downloads,
     icon: h.icon_url,
-    installed: !!(manifest.manual[h.project_id]
+    installed: !!existing[h.project_id] || !!(manifest.files[h.slug] && fs.existsSync(path.join(modsDir, manifest.files[h.slug]))) || !!(manifest.manual[h.project_id]
       && fs.existsSync(path.join(modsDir, manifest.manual[h.project_id])))
   }));
 }
@@ -1064,6 +1066,14 @@ function listResourcePacks(packId) {
 
 async function installMod(projectId, packId) {
   const pack = packDef(packId || config.selectedPack);
+  return inPack(pack.id, () => installModOnce(projectId, pack));
+}
+
+async function installModOnce(projectId, pack) {
+  const existing = await installedProjects(packModsDir(pack.id));
+  const recorded = loadManifest(pack.id).manual[projectId];
+  const current = existing[projectId] || (recorded && fs.existsSync(path.join(packModsDir(pack.id), recorded)) ? recorded : null);
+  if (current) return { filename: current, alreadyInstalled: true };
   const file = await resolveModrinthFile(projectId, pack.version, pack.loader);
   if (!file) throw new Error(`No ${pack.loaderLabel} build of this mod for ${pack.version}`);
   const modsDir = packModsDir(pack.id);
